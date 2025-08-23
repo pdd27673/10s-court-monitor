@@ -18,7 +18,7 @@ name = "scraper"
 source = "apps/scraper"
 
 [services.build]
-buildCommand = "npm install"
+buildCommand = "npm install && npm run build"
 
 [services.deploy]
 startCommand = "npm start"
