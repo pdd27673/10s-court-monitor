@@ -1,0 +1,22 @@
+{
+  "name": "scraper",
+  "version": "1.0.0",
+  "description": "Court booking scraper service for 10s court monitoring system",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "dev": "node --watch src/main.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["court", "scraper", "booking", "monitoring"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "puppeteer": "^21.0.0",
+    "node-cron": "^3.0.0",
+    "pg": "^8.11.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

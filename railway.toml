@@ -1,0 +1,26 @@
+[build]
+builder = "nixpacks"
+
+[[services]]
+name = "web"
+source = "apps/web"
+
+[services.build]
+buildCommand = "npm run build"
+
+[services.deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 60
+
+[[services]]
+name = "scraper"
+source = "apps/scraper"
+
+[services.build]
+buildCommand = "npm install"
+
+[services.deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 60
