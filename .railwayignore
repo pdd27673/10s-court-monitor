@@ -1,48 +1,21 @@
-# Dependencies
-node_modules/
-**/node_modules/
+# Ignore root node_modules
+/node_modules
+/package-lock.json
 
-# Development
+# Ignore other app directories during web service build
+/apps/scraper
+/packages
+
+# Ignore development files
+.git
 .env.local
 .env.development
-*.log
-logs/
-
-# Build outputs
-.next/
-out/
-build/
-dist/
-*.tsbuildinfo
-
-# Testing
-coverage/
-*.test.*
-__tests__/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+.next
+.vercel
 .DS_Store
-Thumbs.db
+*.log
 
-# Git
-.git/
-.gitignore
-
-# Misc
+# Ignore docs and configs not needed for deployment
 README.md
+CLAUDE.md
 *.md
-.eslintrc*
-.prettierrc*
-.taskmaster/
-
-# Only include what's needed for production
-!apps/web/
-!railway.toml
-!package.json
-!pnpm-workspace.yaml

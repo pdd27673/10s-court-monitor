@@ -6,11 +6,11 @@ name = "web"
 source = "apps/web"
 
 [services.build]
-buildCommand = "npm install && npm run build"
+buildCommand = "cd apps/web && npm ci && npm run build"
 watchPatterns = ["apps/web/**"]
 
 [services.deploy]
-startCommand = "npm start"
+startCommand = "cd apps/web && npm start"
 healthcheckPath = "/"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
