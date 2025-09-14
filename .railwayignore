@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Development
+.env.local
+.env.development
+*.log
+logs/
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Testing
+coverage/
+*.test.*
+__tests__/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Misc
+README.md
+*.md
+.eslintrc*
+.prettierrc*
+.taskmaster/
+
+# Only include what's needed for production
+!apps/web/
+!railway.toml
+!package.json
+!pnpm-workspace.yaml

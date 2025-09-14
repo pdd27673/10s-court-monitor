@@ -6,21 +6,21 @@ name = "web"
 source = "apps/web"
 
 [services.build]
-buildCommand = "npm run build"
+buildCommand = "npm install && npm run build"
+watchPatterns = ["apps/web/**"]
 
 [services.deploy]
 startCommand = "npm start"
 healthcheckPath = "/"
 healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
 
-[[services]]
-name = "scraper"
-source = "apps/scraper"
+# Database migration command (optional - can be run manually)
+# [services.deploy]
+# releaseCommand = "npm run db:push"
 
-[services.build]
-buildCommand = "npm install && npm run build"
-
-[services.deploy]
-startCommand = "npm start"
-healthcheckPath = "/health"
-healthcheckTimeout = 60
+# Scraper service will be added in Task 5
+# [[services]]
+# name = "scraper"
+# source = "apps/scraper"
