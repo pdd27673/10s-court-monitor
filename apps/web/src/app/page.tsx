@@ -127,7 +127,7 @@ export default function Home() {
                     Set your preferences
                   </Link> - Choose venues, days, times, and price limits
                 </li>
-                <li>We'll monitor court availability every 10 minutes</li>
+                <li>We&apos;ll monitor court availability every 10 minutes</li>
                 <li>Get instant notifications when courts become available</li>
                 <li>
                   <Link href="/courts" className="text-primary hover:underline">

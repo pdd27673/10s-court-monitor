@@ -7,7 +7,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 
 export async function POST(req: Request) {
   // Get the headers
-  const headerPayload = headers();
+  const headerPayload = await headers();
   const svix_id = headerPayload.get("svix-id");
   const svix_timestamp = headerPayload.get("svix-timestamp");
   const svix_signature = headerPayload.get("svix-signature");
@@ -21,7 +21,6 @@ export async function POST(req: Request) {
 
   // Get the body
   const payload = await req.text();
-  const body = JSON.parse(payload);
 
   // Get the Webhook secret
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -50,7 +49,6 @@ export async function POST(req: Request) {
   }
 
   // Handle the webhook
-  const { id } = evt.data;
   const eventType = evt.type;
 
   if (eventType === "user.created") {
@@ -70,7 +68,8 @@ export async function POST(req: Request) {
         console.log(`User ${primaryEmail.email_address} not in whitelist, deleting...`);
 
         // Delete the user from Clerk
-        await clerkClient.users.deleteUser(clerkUserId);
+        const clerk = await clerkClient();
+        await clerk.users.deleteUser(clerkUserId);
 
         return new Response("User not whitelisted and deleted", { status: 200 });
       }

@@ -58,8 +58,37 @@ const DAYS_OF_WEEK = [
 export function PreferencesForm() {
   const queryClient = useQueryClient();
 
+  // Define types for API response
+  type Venue = {
+    id: string;
+    name: string;
+  };
+
+  type VenuePreference = {
+    venueId: string;
+    preferredDays: number[];
+    preferredTimeStart: number;
+    preferredTimeEnd: number;
+    maxPricePerHour?: string | number;
+  };
+
+  type NotificationPreferences = {
+    emailEnabled: boolean;
+    smsEnabled: boolean;
+    quietHoursStart: number;
+    quietHoursEnd: number;
+    maxNotificationsPerDay: number;
+    notificationCooldownMinutes: number;
+  };
+
+  type PreferencesData = {
+    notificationPreferences: NotificationPreferences;
+    venuePreferences: VenuePreference[];
+    availableVenues: Venue[];
+  };
+
   // Fetch preferences data
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error } = useQuery<PreferencesData>({
     queryKey: ["preferences"],
     queryFn: async () => {
       const response = await fetch("/api/preferences");
@@ -98,14 +127,16 @@ export function PreferencesForm() {
     if (data && !hasInitialized) {
       form.reset({
         notificationPreferences: data.notificationPreferences,
-        venuePreferences: data.venuePreferences.map((pref: any) => ({
+        venuePreferences: data.venuePreferences.map((pref: VenuePreference) => ({
           ...pref,
-          maxPricePerHour: pref.maxPricePerHour ? parseFloat(pref.maxPricePerHour) : undefined,
+          maxPricePerHour: pref.maxPricePerHour ? 
+            (typeof pref.maxPricePerHour === 'string' ? parseFloat(pref.maxPricePerHour) : pref.maxPricePerHour) : 
+            undefined,
         })),
       });
       setHasInitialized(true);
     }
-  }, [data, hasInitialized]);
+  }, [data, hasInitialized, form]);
 
   const saveMutation = useMutation({
     mutationFn: async (data: FormData) => {
@@ -335,7 +366,7 @@ export function PreferencesForm() {
             <div>
               <CardTitle className="text-lg">Venue Preferences</CardTitle>
               <CardDescription>
-                Set monitoring preferences for each venue you're interested in.
+                Set monitoring preferences for each venue you&apos;re interested in.
               </CardDescription>
             </div>
             <Button type="button" variant="outline" onClick={addVenuePreference}>
@@ -347,7 +378,7 @@ export function PreferencesForm() {
         <CardContent>
           {fields.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              No venue preferences set. Click "Add Venue" to get started.
+              No venue preferences set. Click &quot;Add Venue&quot; to get started.
             </div>
           ) : (
             <div className="space-y-6">
@@ -379,7 +410,7 @@ export function PreferencesForm() {
                             <SelectValue placeholder="Choose a venue" />
                           </SelectTrigger>
                           <SelectContent>
-                            {data?.availableVenues?.map((venue: any) => (
+                            {data?.availableVenues?.map((venue: Venue) => (
                               <SelectItem key={venue.id} value={venue.id}>
                                 {venue.name}
                               </SelectItem>
