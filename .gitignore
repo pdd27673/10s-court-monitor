@@ -115,3 +115,5 @@ Thumbs.db
 .taskmaster/
 .cursor/
 .mcp.json
+
+.playwright-mcp/

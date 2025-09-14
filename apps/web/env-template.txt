@@ -1,0 +1,20 @@
+# Environment Variables Template for 10s Court Monitor
+# Copy this file to .env.local and fill in your actual values
+
+# Database
+DATABASE_URL="postgresql://username:password@hostname:port/database_name"
+
+# Clerk Authentication
+CLERK_SECRET_KEY="sk_test_..."
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_test_..."
+WEBHOOK_SECRET="whsec_..."
+
+# Email Service (Resend)
+RESEND_API_KEY="re_..."
+
+# SMS Service (Telnyx)
+TELNYX_API_KEY="KEY..."
+
+# Application
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+

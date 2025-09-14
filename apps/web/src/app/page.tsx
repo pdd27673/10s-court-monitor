@@ -1,17 +1,41 @@
 import Image from "next/image";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
 
 export default function Home() {
   return (
     <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
+      <header className="row-start-1 w-full flex justify-between items-center">
+        <h1 className="text-xl font-semibold">10s Court Monitor</h1>
+        <div className="flex items-center gap-4">
+          <SignedOut>
+            <SignInButton>
+              <button className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
+                Sign In
+              </button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <UserButton />
+          </SignedIn>
+        </div>
+      </header>
       <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
+        <SignedOut>
+          <Image
+            className="dark:invert"
+            src="/next.svg"
+            alt="Next.js logo"
+            width={180}
+            height={38}
+            priority
+          />
+        </SignedOut>
+        <SignedIn>
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-4">Welcome to 10s Court Monitor</h2>
+            <p className="text-lg text-gray-600">Your tennis court booking assistant</p>
+          </div>
+        </SignedIn>
         <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
           <li className="mb-2 tracking-[-.01em]">
             Get started by editing{" "}
