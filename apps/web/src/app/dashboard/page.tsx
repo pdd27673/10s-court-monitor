@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles } from "lucide-react";
@@ -26,10 +26,13 @@ const dashboardItems = [
 
 export default async function DashboardPage() {
   const { userId } = await auth();
-  
+
   if (!userId) {
     redirect("/");
   }
+
+  const user = await currentUser();
+  const displayName = user?.firstName || user?.emailAddresses[0]?.emailAddress?.split('@')[0] || 'there';
 
   return (
     <div className="min-h-screen bg-background -mx-4 sm:-mx-6 lg:-mx-8">
@@ -37,8 +40,8 @@ export default async function DashboardPage() {
         <div className="mx-auto max-w-6xl px-4 py-8">
           <div className="space-y-12">
           <div className="space-y-4 text-center">
-            <TextGenerateEffect 
-              words="Welcome to your Dashboard"
+            <TextGenerateEffect
+              words={`Hello ${displayName}`}
               className="text-5xl font-bold tracking-tight"
             />
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
