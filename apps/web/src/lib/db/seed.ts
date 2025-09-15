@@ -1,4 +1,4 @@
-import { db } from './index';
+import { getDb } from './index';
 import { venues } from './schema/venues';
 
 export async function seedDatabase() {
@@ -73,6 +73,7 @@ export async function seedDatabase() {
     ];
 
     // Insert venues
+    const db = getDb();
     for (const venue of initialVenues) {
       await db.insert(venues).values(venue).onConflictDoNothing();
     }

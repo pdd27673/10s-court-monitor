@@ -1,7 +1,7 @@
 import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { users } from "@/lib/db/schema/users";
 import { clerkClient } from "@clerk/nextjs/server";
 
@@ -75,6 +75,7 @@ export async function POST(req: Request) {
       }
 
       // User is whitelisted, add to database
+      const db = getDb();
       await db.insert(users).values({
         id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         clerkId: clerkUserId,

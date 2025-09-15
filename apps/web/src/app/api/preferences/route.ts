@@ -1,6 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { users, userVenuePreferences, userNotificationPreferences, venues } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -35,6 +35,7 @@ export async function GET() {
     }
 
     // Find user in database
+    const db = getDb();
     const dbUsers = await db.select().from(users).where(eq(users.clerkId, user.id)).limit(1);
     const dbUser = dbUsers[0];
 
@@ -123,6 +124,7 @@ export async function POST(request: NextRequest) {
     const { notificationPreferences, venuePreferences } = validation.data;
 
     // Find user in database
+    const db = getDb();
     const dbUsers = await db.select().from(users).where(eq(users.clerkId, user.id)).limit(1);
     const dbUser = dbUsers[0];
 
