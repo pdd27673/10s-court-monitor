@@ -1,15 +1,10 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-import * as schema from './schema';
+import { createDb, type Database } from '@10s/database';
 
 // Allow database to be undefined during build time
-let db: ReturnType<typeof drizzle> | undefined;
+let db: Database | undefined;
 
 if (process.env.DATABASE_URL) {
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-  });
-  db = drizzle(pool, { schema });
+  db = createDb(process.env.DATABASE_URL);
 } else if (process.env.NODE_ENV !== 'development' && typeof window === 'undefined') {
   // Only throw in production runtime, not during build
   console.warn('DATABASE_URL not found - database will be unavailable');
@@ -26,4 +21,5 @@ export function getDb() {
 // For backwards compatibility, export db but it might be undefined during build
 export { db };
 
-export * from './schema';
+// Re-export all schema for convenience
+export * from '@10s/database';

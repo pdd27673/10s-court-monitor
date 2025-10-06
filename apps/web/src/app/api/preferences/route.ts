@@ -1,7 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { users, userVenuePreferences, userNotificationPreferences, venues } from "@/lib/db/schema";
+import { users, userVenuePreferences, userNotificationPreferences, venues } from "@10s/database";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 

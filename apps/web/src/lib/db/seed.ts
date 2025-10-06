@@ -1,5 +1,5 @@
 import { getDb } from './index';
-import { venues } from './schema/venues';
+import { venues } from '@10s/database';
 
 export async function seedDatabase() {
   console.log('🌱 Seeding database...');

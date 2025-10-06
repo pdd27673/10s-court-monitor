@@ -2,7 +2,7 @@ import { Webhook } from "svix";
 import { headers } from "next/headers";
 import { WebhookEvent } from "@clerk/nextjs/server";
 import { getDb } from "@/lib/db";
-import { users } from "@/lib/db/schema/users";
+import { users } from "@10s/database";
 import { clerkClient } from "@clerk/nextjs/server";
 
 export async function POST(req: Request) {
