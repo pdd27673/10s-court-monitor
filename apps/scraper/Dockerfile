@@ -27,6 +27,9 @@ COPY apps/scraper ./apps/scraper
 # Install dependencies for entire workspace
 RUN npm ci
 
+# Ensure tsx is available at runtime even if devDependencies are omitted
+RUN npm i -g tsx
+
 # Build only the database package (required for scraper)
 RUN npm run build -w @10s/database
 
