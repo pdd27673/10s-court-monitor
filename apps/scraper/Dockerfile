@@ -26,6 +26,9 @@ COPY apps/scraper ./apps/scraper
 # Install dependencies for entire workspace
 RUN npm ci
 
+# Build the database package (required for scraper)
+RUN npm run build -w @10s/database
+
 # Note: .env should be set via Railway environment variables, not copied
 
 # Run as non-root user for security
