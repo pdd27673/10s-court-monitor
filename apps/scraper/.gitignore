@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output (not needed with tsx)
+dist/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store

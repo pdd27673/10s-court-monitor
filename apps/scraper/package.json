@@ -2,10 +2,8 @@
   "name": "@10s/scraper",
   "version": "1.0.0",
   "description": "Tennis court scraping service",
-  "main": "dist/main.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
     "start": "tsx src/main.ts",
     "dev": "tsx --watch src/main.ts"
   },

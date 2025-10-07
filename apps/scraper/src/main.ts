@@ -219,12 +219,12 @@ async function main(): Promise<void> {
     // Initialize browser
     await initBrowser();
 
-    // Schedule cron job for every 10 minutes
+    // Schedule cron job for every 5 minutes
     cron.schedule('*/5 * * * *', () => {
       runScrapingCycle().catch(err => console.error('Cron job error:', err));
     });
 
-    console.log('⏰ Cron job scheduled: every 10 minutes');
+    console.log('⏰ Cron job scheduled: every 5 minutes');
 
     // Run initial scrape immediately
     await runScrapingCycle();
