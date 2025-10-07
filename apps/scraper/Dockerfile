@@ -1,4 +1,5 @@
 # Dockerfile for scraper service in monorepo with tsx
+# Build context: apps/scraper (Railway builds from this directory)
 FROM node:20-alpine
 
 WORKDIR /app
@@ -17,11 +18,11 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 # Copy root package.json and lock file for workspace setup
-COPY package.json package-lock.json ./
+COPY ../../package.json ../../package-lock.json ./
 
 # Copy workspace packages
-COPY packages ./packages
-COPY apps/scraper ./apps/scraper
+COPY ../../packages ./packages
+COPY . ./apps/scraper
 
 # Install dependencies for entire workspace
 RUN npm ci
