@@ -1,16 +1,19 @@
 [variables]
-NIXPACKS_INSTALL_CMD = "cd apps/web && npm ci"
-NIXPACKS_BUILD_CMD = "cd apps/web && npm run build"
+NIXPACKS_INSTALL_CMD = "npm ci"
+NIXPACKS_BUILD_CMD = "npm run build -w @10s/database && cd apps/web && npm run build"
 NIXPACKS_START_CMD = "cd apps/web && npm start"
 
 [phases.setup]
 nixPkgs = ["nodejs_22", "npm-9_x"]
 
 [phases.install]
-cmds = ["cd apps/web && npm ci"]
+cmds = ["npm ci"]
 
 [phases.build]
-cmds = ["cd apps/web && npm run build"]
+cmds = [
+  "npm run build -w @10s/database",
+  "cd apps/web && npm run build"
+]
 
 [start]
 cmd = "cd apps/web && npm start"

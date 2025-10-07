@@ -6,8 +6,8 @@ name = "web"
 source = "apps/web"
 
 [services.build]
-buildCommand = "cd apps/web && npm ci && npm run build"
-watchPatterns = ["apps/web/**"]
+buildCommand = "npm ci && npm run build -w @10s/database && cd apps/web && npm run build"
+watchPatterns = ["apps/web/**", "packages/database/**"]
 
 [services.deploy]
 startCommand = "cd apps/web && npm start"
