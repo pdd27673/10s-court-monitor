@@ -18,16 +18,16 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 # Copy root package.json and lock file for workspace setup
-COPY package.json package-lock.json ./
+COPY ../package.json ../package-lock.json ./
 
 # Copy workspace packages
-COPY packages ./packages
-COPY apps/scraper ./apps/scraper
+COPY ../packages ./packages
+COPY . ./apps/scraper
 
 # Install dependencies for entire workspace
 RUN npm ci
 
-# Build the database package (required for scraper)
+# Build only the database package (required for scraper)
 RUN npm run build -w @10s/database
 
 # Note: .env should be set via Railway environment variables, not copied

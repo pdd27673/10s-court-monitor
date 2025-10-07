@@ -17,16 +17,3 @@ healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
-[[services]]
-name = "scraper"
-source = "."
-
-[services.build]
-builder = "dockerfile"
-dockerfilePath = "apps/scraper/Dockerfile"
-dockerContext = "."
-watchPatterns = ["apps/scraper/**", "packages/database/**"]
-
-[services.deploy]
-restartPolicyType = "on_failure"
-restartPolicyMaxRetries = 10
