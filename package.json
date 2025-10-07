@@ -9,9 +9,9 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspaces",
-    "build": "npm run build -w @10s/database",
+    "build": "node scripts/build-dispatch.mjs",
     "build:scraper": "npm run build -w @10s/database",
-    "start": "node -e \"console.log('Root has no start target')\"",
+    "start": "node scripts/start-dispatch.mjs",
     "start:scraper": "cd apps/scraper && npm start",
     "lint": "npm run lint --workspaces",
     "clean": "rm -rf node_modules && rm -rf apps/*/node_modules && rm -rf packages/*/node_modules"
