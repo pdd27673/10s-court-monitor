@@ -1,4 +1,4 @@
-import { pgTable, varchar, timestamp, boolean, integer, text, decimal } from 'drizzle-orm/pg-core';
+import { pgTable, varchar, timestamp, boolean, integer, text, decimal, uniqueIndex } from 'drizzle-orm/pg-core';
 import { users } from './users';
 
 export const venues = pgTable('venues', {
@@ -39,6 +39,13 @@ export const courtSlots = pgTable('court_slots', {
   scrapedAt: timestamp('scraped_at').defaultNow().notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
-});
+}, (table) => ({
+  // Composite unique constraint for upsert logic
+  uniqueSlot: uniqueIndex('unique_court_slot').on(
+    table.venueId,
+    table.courtName,
+    table.startTime
+  ),
+}));
 
 // Relations will be defined in a separate relations file to avoid circular imports

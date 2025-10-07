@@ -1,9 +1,18 @@
+import 'dotenv/config';
 import puppeteer, { Browser, Page } from 'puppeteer';
 import cron from 'node-cron';
 import { createDb, type Database, venues } from '@10s/database';
 import { eq, and } from 'drizzle-orm';
+import { type Venue, type ScrapedSlot, type ScraperFunction } from './types';
+import { scrapeClubSpark } from './scrapers/clubspark';
+import { scrapeCourtside } from './scrapers/courtside';
+import { storeCourtData, logScrapingRun } from './lib/data-pipeline';
 
-type Venue = typeof venues.$inferSelect;
+// Type-safe scraper dispatcher
+const scraperDispatcher: Record<string, ScraperFunction> = {
+  clubspark: scrapeClubSpark,
+  courtside: scrapeCourtside,
+};
 
 // Global instances
 let browser: Browser | null = null;
@@ -54,13 +63,11 @@ async function initBrowser(): Promise<Browser> {
   throw new Error('Browser initialization failed');
 }
 
-// Scrape a single venue with retry logic
-async function scrapeVenue(venue: typeof venues.$inferSelect): Promise<void> {
+// Scrape a single venue with retry logic using type-safe dispatcher
+async function scrapeVenue(venue: Venue): Promise<ScrapedSlot[]> {
   const maxRetries = 3;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    let page: Page | null = null;
-
     try {
       if (!browser) {
         throw new Error('Browser not initialized');
@@ -68,37 +75,37 @@ async function scrapeVenue(venue: typeof venues.$inferSelect): Promise<void> {
 
       console.log(`🔍 Scraping ${venue.name} (attempt ${attempt}/${maxRetries})...`);
 
-      page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36');
+      // Get the appropriate scraper function for this venue's platform
+      const scraperFn = scraperDispatcher[venue.platform];
 
-      // Navigate to test URL (will be replaced with actual scraper logic in Task 6)
-      await page.goto('https://example.com', {
-        waitUntil: 'networkidle2',
-        timeout: 30000
-      });
+      if (!scraperFn) {
+        console.error(`❌ ${venue.name}: No scraper found for platform "${venue.platform}"`);
+        return [];
+      }
 
-      const title = await page.title();
-      console.log(`✅ ${venue.name}: Page title = "${title}"`);
+      // Call the platform-specific scraper
+      const slots = await scraperFn(venue, browser);
+
+      console.log(`✅ ${venue.name}: Found ${slots.length} available slots`);
 
       // Success - exit retry loop
-      return;
+      return slots;
 
     } catch (error) {
       console.error(`❌ ${venue.name} attempt ${attempt} failed:`, error instanceof Error ? error.message : error);
 
       if (attempt === maxRetries) {
         console.error(`💥 ${venue.name}: Failed after ${maxRetries} attempts`);
+        return [];
       } else {
         const delay = Math.pow(2, attempt) * 1000;
         console.log(`⏳ Retrying ${venue.name} in ${delay/1000}s...`);
         await sleep(delay);
       }
-    } finally {
-      if (page) {
-        await page.close().catch(err => console.error('Failed to close page:', err));
-      }
     }
   }
+
+  return [];
 }
 
 // Main scraping cycle
@@ -123,11 +130,56 @@ async function runScrapingCycle(): Promise<void> {
 
     // Process each venue with isolated error handling
     for (const venue of activeVenues) {
+      const startTime = new Date();
+      let status: 'success' | 'failure' | 'partial' = 'success';
+      let errorMessage: string | undefined;
+      let errorStack: string | undefined;
+      let slotsFound = 0;
+      let slotsAdded = 0;
+      let slotsUpdated = 0;
+
       try {
-        await scrapeVenue(venue);
+        const slots = await scrapeVenue(venue);
+        slotsFound = slots.length;
+
+        if (slots.length > 0) {
+          console.log(`📊 ${venue.name}: Processing ${slots.length} slots...`);
+
+          // Store slots and get newly inserted ones
+          const newSlots = await storeCourtData(db, slots);
+          slotsAdded = newSlots.length;
+          slotsUpdated = slots.length - newSlots.length;
+
+          if (newSlots.length > 0) {
+            console.log(`🆕 ${venue.name}: ${newSlots.length} new slots available!`);
+            // TODO: Trigger notifications for new slots (Task 8)
+            // await notifyUsers(newSlots);
+          }
+        } else {
+          console.log(`📭 ${venue.name}: No available slots found`);
+        }
       } catch (error) {
+        status = 'failure';
+        errorMessage = error instanceof Error ? error.message : String(error);
+        errorStack = error instanceof Error ? error.stack : undefined;
         console.error(`💥 Failed to scrape ${venue.name}:`, error);
         // Continue with other venues - don't let one failure stop everything
+      } finally {
+        const endTime = new Date();
+
+        // Log the scraping run
+        await logScrapingRun(db, {
+          venueId: venue.id,
+          scraperType: venue.platform,
+          status,
+          startTime,
+          endTime,
+          slotsFound,
+          slotsAdded,
+          slotsUpdated,
+          errorMessage,
+          errorStack,
+        });
       }
     }
 
@@ -168,7 +220,7 @@ async function main(): Promise<void> {
     await initBrowser();
 
     // Schedule cron job for every 10 minutes
-    cron.schedule('*/10 * * * *', () => {
+    cron.schedule('*/5 * * * *', () => {
       runScrapingCycle().catch(err => console.error('Cron job error:', err));
     });
 

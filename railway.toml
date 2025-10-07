@@ -20,7 +20,16 @@ restartPolicyMaxRetries = 3
 # [services.deploy]
 # releaseCommand = "npm run db:push"
 
-# Scraper service will be added in Task 5
-# [[services]]
-# name = "scraper"
-# source = "apps/scraper"
+[[services]]
+name = "scraper"
+source = "."
+
+[services.build]
+builder = "dockerfile"
+dockerfilePath = "apps/scraper/Dockerfile"
+dockerContext = "."
+watchPatterns = ["apps/scraper/**", "packages/database/**"]
+
+[services.deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
