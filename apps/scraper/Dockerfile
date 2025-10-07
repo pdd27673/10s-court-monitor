@@ -1,5 +1,5 @@
 # Dockerfile for scraper service in monorepo with tsx
-# Build context: project root (.)
+# Build context: project root (.) - Railway will set this correctly
 FROM node:20-alpine
 
 WORKDIR /app

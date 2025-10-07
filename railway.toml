@@ -1,11 +1,12 @@
-[build]
-builder = "nixpacks"
+# Railway configuration for multi-service deployment
+# This file defines two services: web (frontend) and scraper (background service)
 
 [[services]]
 name = "web"
 source = "apps/web"
 
 [services.build]
+builder = "nixpacks"
 buildCommand = "npm ci && npm run build -w @10s/database && cd apps/web && npm run build"
 watchPatterns = ["apps/web/**", "packages/database/**"]
 
@@ -15,10 +16,6 @@ healthcheckPath = "/"
 healthcheckTimeout = 60
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-# Database migration command (optional - can be run manually)
-# [services.deploy]
-# releaseCommand = "npm run db:push"
 
 [[services]]
 name = "scraper"
