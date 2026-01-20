@@ -1,7 +1,8 @@
 import { db } from "./db";
 import { slots, venues } from "./schema";
 import { eq, and } from "drizzle-orm";
-import { ScrapedSlot, VENUES } from "./scraper";
+import { ScrapedSlot } from "./scraper";
+import { VENUES } from "./constants";
 
 export interface SlotChange {
   venue: string;
