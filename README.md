@@ -1,36 +1,533 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tennis Court Notifier
 
-## Getting Started
+A notification service that monitors tennis court availability on Courtside Tower Hamlets and alerts users via Telegram or Email when slots become available.
 
-First, run the development server:
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [Database Setup](#database-setup)
+- [Adding Users](#adding-users)
+- [Managing Watches](#managing-watches)
+- [Notification Channels](#notification-channels)
+- [Running the Scraper](#running-the-scraper)
+- [Cron Job Setup](#cron-job-setup)
+- [Deployment](#deployment)
+- [API Reference](#api-reference)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Quick Start
 
 ```bash
+# Install dependencies
+npm install
+
+# Copy environment file and configure
+cp .env.example .env
+
+# Generate database migrations
+npm run db:generate
+
+# Run migrations
+npm run db:migrate
+
+# Seed the database (creates test user)
+npm run db:seed
+
+# Start development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app will be available at http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment Variables
 
-## Learn More
+Create a `.env` file based on `.env.example`:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+# Database (SQLite - file path)
+DATABASE_URL=file:./data/tennis.db
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+# Cron job protection (generate a random string)
+CRON_SECRET=your-random-secret-here
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Telegram Bot (get from @BotFather on Telegram)
+TELEGRAM_BOT_TOKEN=123456:ABC-xxxxx
 
-## Deploy on Vercel
+# Gmail (use app password, NOT your regular password)
+GMAIL_USER=your-email@gmail.com
+GMAIL_APP_PASSWORD=your-16-char-app-password
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+# App URL (for links in notifications)
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Setting up Gmail App Password
+
+1. Go to [Google Account Security](https://myaccount.google.com/security)
+2. Enable 2-Factor Authentication if not already enabled
+3. Go to "App passwords" (search for it in Google Account)
+4. Create a new app password for "Mail"
+5. Copy the 16-character password to `GMAIL_APP_PASSWORD`
+
+### Setting up Telegram Bot
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow prompts
+3. Copy the token to `TELEGRAM_BOT_TOKEN`
+4. To get your chat ID, message the bot, then visit:
+   ```
+   https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
+   ```
+   Look for `"chat":{"id":123456789}` in the response
+
+---
+
+## Database Setup
+
+The app uses SQLite with Drizzle ORM. The database file is stored at `data/tennis.db`.
+
+```bash
+# Generate migrations from schema changes
+npm run db:generate
+
+# Apply migrations
+npm run db:migrate
+
+# Seed with test data
+npm run db:seed
+
+# Open Drizzle Studio (database GUI)
+npm run db:studio
+```
+
+### Database Schema
+
+- **users** - User accounts (email)
+- **venues** - Tennis court venues (7 Tower Hamlets locations)
+- **slots** - Court availability (time, court, status, price)
+- **watches** - User alert preferences (venue, times, weekday filters)
+- **notification_channels** - Where to send alerts (telegram, email)
+- **notification_log** - Sent notification history (prevents duplicates)
+
+---
+
+## Adding Users
+
+### Option 1: Using the seed script
+
+Edit `scripts/seed.ts` and run:
+
+```bash
+npx tsx scripts/seed.ts
+```
+
+### Option 2: Direct database insertion
+
+```typescript
+// Using Drizzle
+import { db } from "./src/lib/db";
+import { users } from "./src/lib/schema";
+
+await db.insert(users).values({
+  email: "user@example.com"
+});
+```
+
+### Option 3: SQL via sqlite3
+
+```bash
+sqlite3 data/tennis.db
+
+INSERT INTO users (email) VALUES ('user@example.com');
+```
+
+### Option 4: Via API (if authenticated)
+
+```bash
+# POST to create user (requires auth implementation)
+curl -X POST http://localhost:3000/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+```
+
+---
+
+## Managing Watches
+
+A "watch" defines what slots a user wants to be notified about.
+
+### Creating a Watch
+
+```typescript
+import { db } from "./src/lib/db";
+import { watches } from "./src/lib/schema";
+
+await db.insert(watches).values({
+  userId: 1,                                    // User ID
+  venueId: null,                                // null = all venues, or specific venue ID
+  preferredTimes: JSON.stringify(["5pm", "6pm", "7pm", "8pm"]),  // Preferred times (am/pm format)
+  weekdaysOnly: 1,                              // 1 = only weekdays
+  weekendsOnly: 0,                              // 1 = only weekends
+  active: 1                                     // 1 = active, 0 = paused
+});
+```
+
+### Watch Options
+
+| Field | Description |
+|-------|-------------|
+| `userId` | The user to notify |
+| `venueId` | `null` for all venues, or specific venue ID (1-7) |
+| `preferredTimes` | JSON array of times like `["5pm", "6pm"]` or `null` for any time |
+| `weekdaysOnly` | `1` to only notify on Mon-Fri |
+| `weekendsOnly` | `1` to only notify on Sat-Sun |
+| `active` | `1` to enable, `0` to pause |
+
+### Venue IDs
+
+| ID | Venue |
+|----|-------|
+| 1 | Bethnal Green Gardens |
+| 2 | King Edward Memorial Park |
+| 3 | Poplar Rec Ground |
+| 4 | Ropemakers Field |
+| 5 | St Johns Park |
+| 6 | Victoria Park |
+| 7 | Wapping Gardens |
+
+---
+
+## Notification Channels
+
+### Adding Email Channel
+
+```typescript
+await db.insert(notificationChannels).values({
+  userId: 1,
+  type: "email",
+  destination: "user@example.com",
+  active: 1
+});
+```
+
+### Adding Telegram Channel
+
+```typescript
+await db.insert(notificationChannels).values({
+  userId: 1,
+  type: "telegram",
+  destination: "123456789",  // Telegram chat ID
+  active: 1
+});
+```
+
+### Testing Notifications
+
+```bash
+# Test email
+npx tsx -e "
+import { sendEmailNotification } from './src/lib/notifiers/email';
+await sendEmailNotification('your@email.com', 'Test', '<p>Test notification</p>');
+"
+
+# Test telegram
+npx tsx -e "
+import { sendTelegramNotification } from './src/lib/notifiers/telegram';
+await sendTelegramNotification('YOUR_CHAT_ID', 'Test notification');
+"
+```
+
+---
+
+## Running the Scraper
+
+### Manual Scrape (Development)
+
+```bash
+# Trigger via API (GET works in dev mode)
+curl http://localhost:3000/api/cron/scrape
+
+# Or run the test script
+npx tsx scripts/test-scraper.ts
+```
+
+### What the Scraper Does
+
+1. Fetches availability from all 7 venues for the next 7 days
+2. Parses HTML using Cheerio (no browser needed)
+3. Stores slots in database
+4. Detects newly available slots (was booked -> now available)
+5. Notifies users whose watches match the available slots
+
+---
+
+## Cron Job Setup
+
+### Local Development (node-cron)
+
+Add to your start script or run separately:
+
+```typescript
+import cron from 'node-cron';
+
+// Every 10 minutes between 7am-10pm
+cron.schedule('*/10 7-22 * * *', async () => {
+  await fetch('http://localhost:3000/api/cron/scrape', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${process.env.CRON_SECRET}` }
+  });
+});
+```
+
+### Railway Deployment
+
+Add to `railway.json`:
+
+```json
+{
+  "build": { "builder": "NIXPACKS" },
+  "deploy": {
+    "startCommand": "npm start"
+  },
+  "cron": {
+    "scrape": {
+      "schedule": "*/10 7-22 * * *",
+      "command": "curl -X POST -H 'Authorization: Bearer $CRON_SECRET' $RAILWAY_STATIC_URL/api/cron/scrape"
+    }
+  }
+}
+```
+
+### Vercel Cron
+
+Create `vercel.json`:
+
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/scrape",
+      "schedule": "*/10 7-22 * * *"
+    }
+  ]
+}
+```
+
+### External Cron Services
+
+Use services like [cron-job.org](https://cron-job.org) or [EasyCron](https://www.easycron.com):
+
+```
+URL: https://your-app.railway.app/api/cron/scrape
+Method: POST
+Header: Authorization: Bearer YOUR_CRON_SECRET
+Schedule: */10 7-22 * * *
+```
+
+---
+
+## Deployment
+
+### Railway (Recommended)
+
+1. Create a Railway account at [railway.app](https://railway.app)
+
+2. Connect your GitHub repo or use Railway CLI:
+   ```bash
+   npm i -g @railway/cli
+   railway login
+   railway init
+   ```
+
+3. Add a persistent volume for SQLite:
+   ```bash
+   railway volume add --mount /app/data
+   ```
+
+4. Set environment variables in Railway dashboard:
+   - `DATABASE_URL=file:./data/tennis.db`
+   - `CRON_SECRET=your-secret`
+   - `TELEGRAM_BOT_TOKEN=your-token`
+   - `GMAIL_USER=your-email`
+   - `GMAIL_APP_PASSWORD=your-app-password`
+   - `NEXT_PUBLIC_APP_URL=https://your-app.railway.app`
+
+5. Deploy:
+   ```bash
+   railway up
+   ```
+
+### Vercel
+
+1. Install Vercel CLI:
+   ```bash
+   npm i -g vercel
+   ```
+
+2. Deploy:
+   ```bash
+   vercel
+   ```
+
+3. Set environment variables in Vercel dashboard
+
+**Note**: Vercel's serverless environment has limitations with SQLite. Consider using Turso or another managed SQLite solution for production.
+
+### Fly.io
+
+1. Install flyctl and authenticate
+
+2. Create `fly.toml`:
+   ```toml
+   app = "tennis-notifier"
+
+   [build]
+     builder = "heroku/buildpacks:20"
+
+   [env]
+     NODE_ENV = "production"
+
+   [mounts]
+     source = "data"
+     destination = "/app/data"
+   ```
+
+3. Create volume and deploy:
+   ```bash
+   fly volumes create data --size 1
+   fly deploy
+   ```
+
+---
+
+## API Reference
+
+### GET /api/venues
+
+List all venues.
+
+```bash
+curl http://localhost:3000/api/venues
+```
+
+### GET /api/availability
+
+Get availability for a venue and date.
+
+```bash
+curl "http://localhost:3000/api/availability?venue=victoria-park&date=2025-01-21"
+```
+
+### GET /api/watches
+
+List watches (requires user context).
+
+### POST /api/watches
+
+Create a watch.
+
+```bash
+curl -X POST http://localhost:3000/api/watches \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": 1,
+    "venueId": null,
+    "preferredTimes": ["6pm", "7pm"],
+    "weekdaysOnly": true
+  }'
+```
+
+### GET /api/channels
+
+List notification channels.
+
+### POST /api/channels
+
+Add a notification channel.
+
+### POST /api/cron/scrape
+
+Trigger a scrape job. Protected by `CRON_SECRET` in production.
+
+```bash
+curl -X POST http://localhost:3000/api/cron/scrape \
+  -H "Authorization: Bearer YOUR_CRON_SECRET"
+```
+
+---
+
+## Troubleshooting
+
+### Scraper returns no slots
+
+1. Check if the website structure changed
+2. Test manually: `curl https://tennistowerhamlets.com/book/courts/victoria-park/2025-01-21`
+3. Run test script: `npx tsx scripts/test-scraper.ts`
+
+### Notifications not sending
+
+1. Check env vars are set correctly
+2. Test notification channels individually (see Testing Notifications section)
+3. Check notification log for duplicates (same slot won't notify twice)
+
+### Database locked errors
+
+SQLite uses WAL mode for better concurrency, but heavy writes can still cause locks:
+
+1. Ensure only one scraper process runs at a time
+2. Check for long-running transactions
+3. Consider using Turso for production
+
+### Gmail "Less secure app" errors
+
+Gmail requires App Passwords with 2FA enabled. Regular passwords won't work.
+
+### Telegram bot not responding
+
+1. Verify token with: `curl https://api.telegram.org/bot<TOKEN>/getMe`
+2. Check chat ID is correct
+3. Ensure you've started a conversation with the bot
+
+---
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── page.tsx              # Landing page
+│   ├── dashboard/
+│   │   └── page.tsx          # Availability dashboard
+│   └── api/
+│       ├── availability/     # GET availability
+│       ├── venues/           # GET venues
+│       ├── watches/          # CRUD watches
+│       ├── channels/         # CRUD channels
+│       └── cron/scrape/      # Scrape trigger
+├── lib/
+│   ├── db.ts                 # Drizzle client
+│   ├── schema.ts             # Database schema
+│   ├── constants.ts          # Venue list
+│   ├── scraper.ts            # HTTP + Cheerio scraping
+│   ├── differ.ts             # Change detection
+│   └── notifiers/
+│       ├── index.ts          # Notification orchestrator
+│       ├── email.ts          # Gmail via nodemailer
+│       └── telegram.ts       # Telegram Bot API
+├── scripts/
+│   ├── seed.ts               # Database seeding
+│   └── test-scraper.ts       # Scraper testing
+└── data/
+    └── tennis.db             # SQLite database
+```
+
+---
+
+## License
+
+MIT

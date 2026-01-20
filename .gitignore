@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+.runbook.md
 
 # debug
 npm-debug.log*
