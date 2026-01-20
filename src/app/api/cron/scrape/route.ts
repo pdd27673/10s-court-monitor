@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { scrapeVenue, VENUES, getNextNDays } from "@/lib/scraper";
+import { scrapeVenue, getNextNDays } from "@/lib/scraper";
+import { VENUES } from "@/lib/constants";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
 import { notifyUsers } from "@/lib/notifiers";
 import type { ScrapedSlot } from "@/lib/scraper";

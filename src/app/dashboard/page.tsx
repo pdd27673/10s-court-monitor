@@ -52,7 +52,7 @@ function formatDate(dateStr: string): string {
 }
 
 export default function Dashboard() {
-  const [selectedVenue, setSelectedVenue] = useState(VENUES[0].slug);
+  const [selectedVenue, setSelectedVenue] = useState<string>(VENUES[0].slug);
   const [selectedDate, setSelectedDate] = useState(getNext7Days()[0]);
   const [availability, setAvailability] = useState<VenueAvailability | null>(
     null

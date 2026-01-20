@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { VENUES } from "@/lib/scraper";
+import { VENUES } from "@/lib/constants";
 
 export async function GET() {
   // Return venues from the scraper config (always up to date)

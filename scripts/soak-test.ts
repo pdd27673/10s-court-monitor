@@ -27,7 +27,7 @@ import {
   notificationChannels,
   notificationLog,
 } from "../src/lib/schema";
-import { eq, and, sql, count } from "drizzle-orm";
+import { eq, sql, count } from "drizzle-orm";
 import { scrapeVenue, getNextNDays } from "../src/lib/scraper";
 import { VENUES } from "../src/lib/constants";
 import { ensureVenuesExist, storeAndDiff } from "../src/lib/differ";
@@ -143,43 +143,42 @@ async function testStoreAndDiff(scrapedSlots: ScrapedSlot[]) {
   }
 }
 
-async function testSimulateAvailabilityChange(): Promise<number> {
+async function testSimulateAvailabilityChange(): Promise<void> {
   // Find some booked slots and temporarily mark them available
+  // Join with venues to get the slug
   const bookedSlots = await db
-    .select()
+    .select({
+      date: slots.date,
+      time: slots.time,
+      court: slots.court,
+      venueSlug: venues.slug,
+    })
     .from(slots)
+    .innerJoin(venues, eq(slots.venueId, venues.id))
     .where(eq(slots.status, "booked"))
     .limit(5);
 
   if (bookedSlots.length === 0) {
     log("  No booked slots to simulate change", c.yellow);
-    return 0;
+    return;
   }
 
-  // Create fake "newly available" slots
-  const fakeAvailable: ScrapedSlot[] = bookedSlots.map((slot) => {
-    const venue = VENUES.find((v) => {
-      // We need to get the venue slug from ID
-      return true; // simplified
-    });
-    return {
-      venue: "victoria-park", // Use a known venue
-      date: slot.date,
-      time: slot.time,
-      court: slot.court,
-      status: "available" as const,
-      price: "£5.00",
-    };
-  });
+  // Create "newly available" slots using real venue data
+  const nowAvailable: ScrapedSlot[] = bookedSlots.map((slot) => ({
+    venue: slot.venueSlug,
+    date: slot.date,
+    time: slot.time,
+    court: slot.court,
+    status: "available" as const,
+    price: "£5.00",
+  }));
 
   // This should detect changes
-  const changes = await storeAndDiff(fakeAvailable);
+  const changes = await storeAndDiff(nowAvailable);
   if (verbose) {
-    log(`  Simulated ${fakeAvailable.length} slots becoming available`, c.dim);
+    log(`  Simulated ${nowAvailable.length} slots becoming available`, c.dim);
     log(`  Detected ${changes.length} changes`, c.dim);
   }
-
-  return changes.length;
 }
 
 async function testUserSetup() {
@@ -217,8 +216,6 @@ async function testUserSetup() {
       log(`  Created test user: ${testEmail}`, c.dim);
     }
   }
-
-  return user[0];
 }
 
 async function testNotificationMatching() {

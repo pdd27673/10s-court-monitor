@@ -31,8 +31,8 @@ import {
 import { eq, lt, sql, count, desc } from "drizzle-orm";
 import { scrapeVenue, getNextNDays } from "../src/lib/scraper";
 import { VENUES } from "../src/lib/constants";
-import { sendEmailNotification } from "../src/lib/notifiers/email";
-import { sendTelegramNotification } from "../src/lib/notifiers/telegram";
+import { sendEmail } from "../src/lib/notifiers/email";
+import { sendTelegramMessage } from "../src/lib/notifiers/telegram";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -287,7 +287,7 @@ async function testNotify() {
 
     try {
       if (channel.type === "email") {
-        await sendEmailNotification(
+        await sendEmail(
           channel.destination,
           "Test Notification - Tennis Court Notifier",
           `<h2>Test Notification</h2>
@@ -297,7 +297,7 @@ async function testNotify() {
         );
         log(`✓ Sent test email to ${channel.destination}`, "green");
       } else if (channel.type === "telegram") {
-        await sendTelegramNotification(
+        await sendTelegramMessage(
           channel.destination,
           `<b>Test Notification</b>\n\nThis is a test notification from Tennis Court Notifier.\n\nIf you received this, your Telegram notifications are working!\n\n<i>Sent at: ${new Date().toISOString()}</i>`
         );
