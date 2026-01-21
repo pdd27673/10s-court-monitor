@@ -162,12 +162,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
     Nodemailer({
       server: {
-        host: "smtp.gmail.com",
-        port: 587,
+        host: process.env.SMTP_HOST || "smtp.gmail.com",
+        port: parseInt(process.env.SMTP_PORT || "465"),
+        secure: process.env.SMTP_PORT === "587" ? false : true,
         auth: {
           user: process.env.GMAIL_USER,
           pass: process.env.GMAIL_APP_PASSWORD,
         },
+        connectionTimeout: 10000,
       },
       from: process.env.GMAIL_USER,
     }),
