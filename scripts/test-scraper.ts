@@ -1,16 +1,17 @@
 import { scrapeVenue, getNextNDays } from "../src/lib/scraper";
 
 async function main() {
-  const dates = getNextNDays(2);
+  const dates = getNextNDays(7);
   console.log("Testing scraper for dates:", dates);
 
   for (const date of dates) {
     console.log(`\n--- Scraping ropemakers-field for ${date} ---`);
-    const slots = await scrapeVenue("ropemakers-field", date);
+    const rfSlots = await scrapeVenue("ropemakers-field", date);
+    // const slots = await scrapeVenue("victoria-park", date);
 
     // Group by time for readability
-    const byTime: Record<string, typeof slots> = {};
-    for (const slot of slots) {
+    const byTime: Record<string, typeof rfSlots> = {};
+    for (const slot of rfSlots) {
       if (!byTime[slot.time]) byTime[slot.time] = [];
       byTime[slot.time].push(slot);
     }

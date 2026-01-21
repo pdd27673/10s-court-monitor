@@ -10,9 +10,8 @@ function matchesWatch(
   change: SlotChange,
   watch: {
     venueId: number | null;
-    preferredTimes: string | null;
-    weekdaysOnly: number | null;
-    weekendsOnly: number | null;
+    weekdayTimes: string | null;
+    weekendTimes: string | null;
   },
   venueIdMap: Record<string, number>
 ): boolean {
@@ -22,26 +21,27 @@ function matchesWatch(
     if (changeVenueId !== watch.venueId) return false;
   }
 
-  // Check day of week preference
+  // Check day of week and time preferences
   const date = new Date(change.date);
   const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
-  if (watch.weekdaysOnly && isWeekend) return false;
-  if (watch.weekendsOnly && !isWeekend) return false;
+  // Get the appropriate time list based on day type
+  const timesJson = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
 
-  // Check time preference (times stored as "5pm", "6pm", etc.)
-  if (watch.preferredTimes) {
-    try {
-      const preferredTimes: string[] = JSON.parse(watch.preferredTimes);
-      // Direct match on am/pm times (e.g., "5pm", "6pm")
-      const changeTime = change.time.toLowerCase().trim();
-      if (!preferredTimes.some((t) => t.toLowerCase().trim() === changeTime)) {
-        return false;
-      }
-    } catch {
-      // If JSON parse fails, skip time filtering
+  // If no times configured for this day type, skip
+  if (!timesJson) return false;
+
+  try {
+    const preferredTimes: string[] = JSON.parse(timesJson);
+    // Direct match on am/pm times (e.g., "5pm", "6pm")
+    const changeTime = change.time.toLowerCase().trim();
+    if (!preferredTimes.some((t) => t.toLowerCase().trim() === changeTime)) {
+      return false;
     }
+  } catch {
+    // If JSON parse fails, skip this watch
+    return false;
   }
 
   return true;

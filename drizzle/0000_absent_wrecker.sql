@@ -32,6 +32,10 @@ CREATE TABLE `slots` (
 CREATE TABLE `users` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`email` text NOT NULL,
+	`name` text,
+	`email_verified` text,
+	`image` text,
+	`is_allowed` integer DEFAULT 0,
 	`created_at` text DEFAULT CURRENT_TIMESTAMP
 );
 --> statement-breakpoint
@@ -43,13 +47,19 @@ CREATE TABLE `venues` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `venues_slug_unique` ON `venues` (`slug`);--> statement-breakpoint
+CREATE TABLE `verification_tokens` (
+	`identifier` text NOT NULL,
+	`token` text NOT NULL,
+	`expires` text NOT NULL,
+	PRIMARY KEY(`identifier`, `token`)
+);
+--> statement-breakpoint
 CREATE TABLE `watches` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer,
 	`venue_id` integer,
-	`preferred_times` text,
-	`weekdays_only` integer DEFAULT 0,
-	`weekends_only` integer DEFAULT 0,
+	`weekday_times` text,
+	`weekend_times` text,
 	`active` integer DEFAULT 1,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`venue_id`) REFERENCES `venues`(`id`) ON UPDATE no action ON DELETE no action

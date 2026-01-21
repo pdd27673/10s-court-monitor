@@ -21,11 +21,12 @@ export async function GET() {
         id: watch.id,
         userId: watch.userId,
         venue: venue ? { slug: venue.slug, name: venue.name } : null,
-        preferredTimes: watch.preferredTimes
-          ? JSON.parse(watch.preferredTimes)
+        weekdayTimes: watch.weekdayTimes
+          ? JSON.parse(watch.weekdayTimes)
           : null,
-        weekdaysOnly: Boolean(watch.weekdaysOnly),
-        weekendsOnly: Boolean(watch.weekendsOnly),
+        weekendTimes: watch.weekendTimes
+          ? JSON.parse(watch.weekendTimes)
+          : null,
         active: Boolean(watch.active),
       };
     })
@@ -37,8 +38,7 @@ export async function GET() {
 // POST /api/watches - Create a new watch
 export async function POST(request: Request) {
   const body = await request.json();
-  const { userId, venueSlug, preferredTimes, weekdaysOnly, weekendsOnly } =
-    body;
+  const { userId, venueSlug, weekdayTimes, weekendTimes } = body;
 
   if (!userId) {
     return NextResponse.json({ error: "userId is required" }, { status: 400 });
@@ -58,9 +58,8 @@ export async function POST(request: Request) {
     .values({
       userId,
       venueId,
-      preferredTimes: preferredTimes ? JSON.stringify(preferredTimes) : null,
-      weekdaysOnly: weekdaysOnly ? 1 : 0,
-      weekendsOnly: weekendsOnly ? 1 : 0,
+      weekdayTimes: weekdayTimes ? JSON.stringify(weekdayTimes) : null,
+      weekendTimes: weekendTimes ? JSON.stringify(weekendTimes) : null,
       active: 1,
     })
     .returning();

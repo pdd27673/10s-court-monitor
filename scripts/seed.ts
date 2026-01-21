@@ -21,19 +21,20 @@ async function seed() {
   if (user) {
     console.log(`✓ Created user: ${user.email} (ID: ${user.id})`);
 
-    // Create a watch for evening slots on weekdays
+    // Create a watch with separate weekday/weekend preferences
     const [watch] = await db
       .insert(watches)
       .values({
         userId: user.id,
         venueId: null, // All venues
-        preferredTimes: JSON.stringify(["5pm", "6pm", "7pm", "8pm"]),
-        weekdaysOnly: 1,
-        weekendsOnly: 0,
+        weekdayTimes: JSON.stringify(["4pm", "5pm", "6pm", "7pm", "8pm", "9pm"]),
+        weekendTimes: JSON.stringify(["11am", "12pm", "1pm", "2pm", "3pm", "4pm", "5pm", "6pm"]),
         active: 1,
       })
       .returning();
-    console.log(`✓ Created watch for evening weekday slots (ID: ${watch.id})`);
+    console.log(`✓ Created watch (ID: ${watch.id})`);
+    console.log(`  Weekdays: 4pm-9pm`);
+    console.log(`  Weekends: 11am-6pm`);
 
     // Create email notification channel
     const [emailChannel] = await db

@@ -193,13 +193,12 @@ async function testUserSetup() {
       .values({ email: testEmail })
       .returning();
 
-    // Add a watch for all venues, evening times
+    // Add a watch for all venues with separate weekday/weekend times
     await db.insert(watches).values({
       userId: newUser.id,
       venueId: null,
-      preferredTimes: JSON.stringify(["5pm", "6pm", "7pm", "8pm"]),
-      weekdaysOnly: 0,
-      weekendsOnly: 0,
+      weekdayTimes: JSON.stringify(["4pm", "5pm", "6pm", "7pm", "8pm", "9pm"]),
+      weekendTimes: JSON.stringify(["11am", "12pm", "1pm", "2pm", "3pm", "4pm", "5pm", "6pm"]),
       active: 1,
     });
 
