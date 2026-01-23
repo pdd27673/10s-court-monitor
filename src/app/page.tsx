@@ -9,21 +9,19 @@ export default function Home() {
         Never miss a slot again.
       </p>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col sm:flex-row gap-4">
         <Link
-          href="/dashboard"
-          className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+          href="/login"
+          className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-center"
         >
-          View Availability
+          Sign In
         </Link>
-        <a
-          href="https://tennistowerhamlets.com/courts"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-6 py-3 border border-gray-300 dark:border-gray-700 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+        <Link
+          href="/dashboard?guest=true"
+          className="px-6 py-3 border border-gray-300 dark:border-gray-700 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-center"
         >
-          Book Courts →
-        </a>
+          View as Guest
+        </Link>
       </div>
 
       <div className="mt-16 text-center text-sm text-gray-500 dark:text-gray-400">

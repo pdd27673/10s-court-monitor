@@ -5,6 +5,12 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const isOnDashboard = req.nextUrl.pathname.startsWith("/dashboard");
   const isOnLogin = req.nextUrl.pathname.startsWith("/login");
+  const isGuestMode = req.nextUrl.searchParams.get("guest") === "true";
+
+  // Allow guest access to dashboard
+  if (isOnDashboard && isGuestMode) {
+    return NextResponse.next();
+  }
 
   // Redirect unauthenticated users from dashboard to login
   if (isOnDashboard && !isLoggedIn) {

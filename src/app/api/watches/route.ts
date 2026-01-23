@@ -2,10 +2,19 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { watches, venues } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { auth } from "@/lib/auth";
 
-// GET /api/watches - List all watches (for now, no auth)
+// GET /api/watches - List user's watches
 export async function GET() {
-  const allWatches = await db.query.watches.findMany();
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userId = parseInt(session.user.id);
+  const allWatches = await db.query.watches.findMany({
+    where: eq(watches.userId, userId),
+  });
 
   // Enrich with venue info
   const enriched = await Promise.all(
@@ -37,12 +46,14 @@ export async function GET() {
 
 // POST /api/watches - Create a new watch
 export async function POST(request: Request) {
-  const body = await request.json();
-  const { userId, venueSlug, weekdayTimes, weekendTimes } = body;
-
-  if (!userId) {
-    return NextResponse.json({ error: "userId is required" }, { status: 400 });
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const userId = parseInt(session.user.id);
+  const body = await request.json();
+  const { venueSlug, weekdayTimes, weekendTimes } = body;
 
   // Get venue ID if provided
   let venueId = null;

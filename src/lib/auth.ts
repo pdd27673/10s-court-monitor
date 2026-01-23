@@ -1,14 +1,55 @@
 import NextAuth from "next-auth";
-import Nodemailer from "next-auth/providers/nodemailer";
+import { Resend } from "resend";
 import { db } from "./db";
 import { users, verificationTokens } from "./schema";
 import { eq, and } from "drizzle-orm";
 import type { Adapter } from "next-auth/adapters";
+import type { Provider } from "next-auth/providers";
 
-// Custom adapter for verification tokens only
+// Resend client for HTTP-based email (works on Railway where SMTP is blocked)
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+// Custom email provider using Resend HTTP API
+function ResendProvider(): Provider {
+  console.log("Using Resend email provider");
+  return {
+    id: "resend",
+    name: "Email",
+    type: "email",
+    maxAge: 24 * 60 * 60, // 24 hours
+    sendVerificationRequest: async ({ identifier: email, url }) => {
+      if (!resend) {
+        throw new Error("RESEND_API_KEY is not configured");
+      }
+      const result = await resend.emails.send({
+        from: process.env.EMAIL_FROM || "Tennis Court Notifier <onboarding@resend.dev>",
+        to: email,
+        subject: "Sign in to Tennis Court Notifier",
+        html: `
+          <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
+            <h2>Sign in to Tennis Court Notifier</h2>
+            <p>Click the button below to sign in:</p>
+            <a href="${url}" style="display: inline-block; background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">
+              Sign in
+            </a>
+            <p style="color: #666; font-size: 14px;">If you didn't request this email, you can safely ignore it.</p>
+            <p style="color: #666; font-size: 12px;">This link expires in 24 hours.</p>
+          </div>
+        `,
+      });
+      console.log("Resend email result:", result.error ? result.error : result);
+      if (result.error) {
+        throw new Error(`Resend error: ${result.error.message}`);
+      }
+    },
+  };
+}
+
+// Custom adapter for our database schema
 // We use integer user IDs (not UUIDs), so we can't use the standard DrizzleAdapter
-// This adapter only implements the methods needed for magic link authentication
-const verificationTokenAdapter: Adapter = {
+const customAdapter: Adapter = {
   async createVerificationToken(data) {
     await db.insert(verificationTokens).values({
       identifier: data.identifier,
@@ -49,10 +90,7 @@ const verificationTokenAdapter: Adapter = {
     };
   },
 
-  // User methods
   async createUser(data) {
-    // We don't create users through NextAuth - users are pre-added to allowlist
-    // But NextAuth may call this, so we return the data as-is
     const result = await db.insert(users).values({
       email: data.email,
       name: data.name ?? null,
@@ -99,7 +137,6 @@ const verificationTokenAdapter: Adapter = {
   },
 
   async getUserByAccount() {
-    // We don't use OAuth accounts, only magic link
     return null;
   },
 
@@ -133,17 +170,14 @@ const verificationTokenAdapter: Adapter = {
   },
 
   async linkAccount() {
-    // We don't use OAuth accounts
     return undefined;
   },
 
-  // Session methods - not used with JWT strategy but required by interface
   async createSession() {
     throw new Error("JWT strategy - sessions not stored in DB");
   },
 
   async getSessionAndUser() {
-    // JWT strategy - sessions not stored in DB
     return null;
   },
 
@@ -152,51 +186,37 @@ const verificationTokenAdapter: Adapter = {
   },
 
   async deleteSession() {
-    // JWT strategy - sessions not stored in DB
     return undefined;
   },
 };
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: verificationTokenAdapter,
-  providers: [
-    Nodemailer({
-      server: {
-        host: process.env.SMTP_HOST || "smtp.gmail.com",
-        port: parseInt(process.env.SMTP_PORT || "465"),
-        secure: process.env.SMTP_PORT === "587" ? false : true,
-        auth: {
-          user: process.env.GMAIL_USER,
-          pass: process.env.GMAIL_APP_PASSWORD,
-        },
-        connectionTimeout: 10000,
-      },
-      from: process.env.GMAIL_USER,
-    }),
-  ],
+  adapter: customAdapter,
+  providers: [ResendProvider()],
   pages: {
     signIn: "/login",
     verifyRequest: "/login/check-email",
     error: "/login/error",
   },
   callbacks: {
-    async signIn({ user }) {
-      // Check if user is in the allowlist
+    async signIn({ user, email }) {
       if (!user.email) return false;
 
-      const dbUser = await db.query.users.findFirst({
-        where: eq(users.email, user.email),
-      });
-
-      // Only allow users who exist AND are marked as allowed
-      if (!dbUser || !dbUser.isAllowed) {
-        return false;
+      // For email provider: check allowlist before sending the magic link
+      // email.verificationRequest is true when requesting the link, false when clicking it
+      if (email?.verificationRequest) {
+        const dbUser = await db.query.users.findFirst({
+          where: eq(users.email, user.email),
+        });
+        // Only send magic link to users who exist AND are allowed
+        if (!dbUser || !dbUser.isAllowed) {
+          return false;
+        }
       }
 
       return true;
     },
     async jwt({ token, user }) {
-      // On sign in, fetch the database user and add their ID to the token
       if (user?.email) {
         const dbUser = await db.query.users.findFirst({
           where: eq(users.email, user.email),
@@ -208,7 +228,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      // Add user ID from JWT token to session
       if (session.user && token.userId) {
         session.user.id = String(token.userId);
       }

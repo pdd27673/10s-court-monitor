@@ -58,21 +58,24 @@ CRON_SECRET=your-random-secret-here
 # Telegram Bot (get from @BotFather on Telegram)
 TELEGRAM_BOT_TOKEN=123456:ABC-xxxxx
 
-# Gmail (use app password, NOT your regular password)
-GMAIL_USER=your-email@gmail.com
-GMAIL_APP_PASSWORD=your-16-char-app-password
+# Email via Resend (HTTP API - works on Railway/cloud)
+# Sign up at https://resend.com (free: 3000 emails/month)
+RESEND_API_KEY=re_xxxxxxxxxxxx
+EMAIL_FROM=Tennis Court Notifier <onboarding@resend.dev>
+
+# Auth secret (generate a random string)
+AUTH_SECRET=your-random-secret-here
 
 # App URL (for links in notifications)
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-### Setting up Gmail App Password
+### Setting up Resend
 
-1. Go to [Google Account Security](https://myaccount.google.com/security)
-2. Enable 2-Factor Authentication if not already enabled
-3. Go to "App passwords" (search for it in Google Account)
-4. Create a new app password for "Mail"
-5. Copy the 16-character password to `GMAIL_APP_PASSWORD`
+1. Sign up at [resend.com](https://resend.com) (free tier: 3000 emails/month)
+2. Create an API key in the dashboard
+3. Copy the API key to `RESEND_API_KEY`
+4. Optionally verify a domain to customize the sender address in `EMAIL_FROM`
 
 ### Setting up Telegram Bot
 
@@ -353,8 +356,10 @@ Schedule: */10 7-22 * * *
    - `DATABASE_URL=file:./data/tennis.db`
    - `CRON_SECRET=your-secret`
    - `TELEGRAM_BOT_TOKEN=your-token`
-   - `GMAIL_USER=your-email`
-   - `GMAIL_APP_PASSWORD=your-app-password`
+   - `RESEND_API_KEY=your-resend-api-key`
+   - `EMAIL_FROM=Tennis Court Notifier <onboarding@resend.dev>`
+   - `AUTH_SECRET=your-auth-secret`
+   - `AUTH_URL=https://your-app.railway.app`
    - `NEXT_PUBLIC_APP_URL=https://your-app.railway.app`
 
 5. Deploy:
@@ -483,9 +488,11 @@ SQLite uses WAL mode for better concurrency, but heavy writes can still cause lo
 2. Check for long-running transactions
 3. Consider using Turso for production
 
-### Gmail "Less secure app" errors
+### Email not sending
 
-Gmail requires App Passwords with 2FA enabled. Regular passwords won't work.
+1. Check `RESEND_API_KEY` is set correctly
+2. Verify your Resend account is active
+3. Check the Resend dashboard for delivery logs
 
 ### Telegram bot not responding
 
@@ -517,7 +524,7 @@ src/
 │   ├── differ.ts             # Change detection
 │   └── notifiers/
 │       ├── index.ts          # Notification orchestrator
-│       ├── email.ts          # Gmail via nodemailer
+│       ├── email.ts          # Email via Resend HTTP API
 │       └── telegram.ts       # Telegram Bot API
 ├── scripts/
 │   ├── seed.ts               # Database seeding
