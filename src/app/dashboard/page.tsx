@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { VENUES } from "@/lib/constants";
 
 interface Slot {
@@ -52,6 +54,8 @@ function formatDate(dateStr: string): string {
 }
 
 export default function Dashboard() {
+  const { status } = useSession();
+  const router = useRouter();
   const [selectedVenue, setSelectedVenue] = useState<string>(VENUES[0].slug);
   const [selectedDate, setSelectedDate] = useState(getNext7Days()[0]);
   const [availability, setAvailability] = useState<VenueAvailability | null>(
@@ -61,7 +65,16 @@ export default function Dashboard() {
 
   const dates = getNext7Days();
 
+  // Redirect to login if not authenticated
   useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+    }
+  }, [status, router]);
+
+  useEffect(() => {
+    if (status !== "authenticated") return;
+
     async function fetchAvailability() {
       setLoading(true);
       try {
@@ -78,7 +91,7 @@ export default function Dashboard() {
     }
 
     fetchAvailability();
-  }, [selectedVenue, selectedDate]);
+  }, [selectedVenue, selectedDate, status]);
 
   // Group slots by time
   const slotsByTime: Record<string, Slot[]> = {};
@@ -87,6 +100,20 @@ export default function Dashboard() {
       if (!slotsByTime[slot.time]) slotsByTime[slot.time] = [];
       slotsByTime[slot.time].push(slot);
     }
+  }
+
+  // Show loading while checking auth
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
+
+  // Don't render dashboard content if not authenticated
+  if (status !== "authenticated") {
+    return null;
   }
 
   return (

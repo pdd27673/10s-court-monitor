@@ -1,29 +1,29 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { SlotChange } from "../differ";
 
-// Create transporter with Gmail app password
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+// Resend client for HTTP-based email
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
 
 export async function sendEmail(to: string, subject: string, html: string) {
-  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-    console.warn("Gmail credentials not set, skipping email notification");
+  if (!resend) {
+    console.warn("RESEND_API_KEY not set, skipping email notification");
     return;
   }
 
-  const info = await transporter.sendMail({
-    from: `"Tennis Notifier" <${process.env.GMAIL_USER}>`,
+  const result = await resend.emails.send({
+    from: process.env.EMAIL_FROM || "Tennis Court Notifier <onboarding@resend.dev>",
     to,
     subject,
     html,
   });
 
-  return info;
+  if (result.error) {
+    throw new Error(`Resend error: ${result.error.message}`);
+  }
+
+  return result;
 }
 
 export function formatSlotChangesForEmail(changes: SlotChange[]): {
@@ -34,7 +34,7 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
     return { subject: "", html: "" };
   }
 
-  const subject = `🎾 ${changes.length} tennis court${changes.length > 1 ? "s" : ""} now available`;
+  const subject = `${changes.length} tennis court${changes.length > 1 ? "s" : ""} now available`;
 
   // Group by venue and date
   const grouped: Record<string, SlotChange[]> = {};
@@ -46,7 +46,7 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
 
   let html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h1 style="color: #16a34a;">🎾 Tennis Courts Available!</h1>
+      <h1 style="color: #16a34a;">Tennis Courts Available!</h1>
   `;
 
   for (const [key, slots] of Object.entries(grouped)) {

@@ -2,15 +2,23 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { notificationChannels } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { auth } from "@/lib/auth";
 
-// GET /api/channels - List all notification channels
+// GET /api/channels - List user's notification channels
 export async function GET() {
-  const channels = await db.query.notificationChannels.findMany();
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userId = parseInt(session.user.id);
+  const channels = await db.query.notificationChannels.findMany({
+    where: eq(notificationChannels.userId, userId),
+  });
 
   return NextResponse.json({
     channels: channels.map((c) => ({
       id: c.id,
-      userId: c.userId,
       type: c.type,
       destination: c.destination,
       active: Boolean(c.active),
@@ -20,12 +28,18 @@ export async function GET() {
 
 // POST /api/channels - Create a new notification channel
 export async function POST(request: Request) {
-  const body = await request.json();
-  const { userId, type, destination } = body;
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  if (!userId || !type || !destination) {
+  const userId = parseInt(session.user.id);
+  const body = await request.json();
+  const { type, destination } = body;
+
+  if (!type || !destination) {
     return NextResponse.json(
-      { error: "userId, type, and destination are required" },
+      { error: "type and destination are required" },
       { status: 400 }
     );
   }
