@@ -103,32 +103,47 @@ export async function notifyUsers(changes: SlotChange[]) {
 
       try {
         // Send notification based on channel type
+        let notificationSent = false;
+        
         if (channel.type === "telegram") {
           const message = formatSlotChangesForTelegram(notifiedSlots);
           await sendTelegramMessage(channel.destination, message);
+          notificationSent = true;
         } else if (channel.type === "email") {
           const { subject, html } = formatSlotChangesForEmail(notifiedSlots);
           await sendEmail(channel.destination, subject, html);
+          notificationSent = true;
+        } else {
+          // Unsupported channel type (e.g., whatsapp)
+          console.error(
+            `Unsupported notification channel type: ${channel.type} for user ${watch.userId}. ` +
+            `Channel ID: ${channel.id}. Notification not sent.`
+          );
+          // Don't log as sent - skip this channel
+          continue;
         }
 
-        // Log the notifications
-        for (const change of notifiedSlots) {
-          const slotKey = `${change.venue}:${change.date}:${change.time}:${change.court}`;
-          await db.insert(notificationLog).values({
-            userId: watch.userId,
-            channelId: channel.id,
-            slotKey,
-          });
-        }
+        // Only log notifications if they were actually sent
+        if (notificationSent) {
+          for (const change of notifiedSlots) {
+            const slotKey = `${change.venue}:${change.date}:${change.time}:${change.court}`;
+            await db.insert(notificationLog).values({
+              userId: watch.userId,
+              channelId: channel.id,
+              slotKey,
+            });
+          }
 
-        console.log(
-          `Notified user ${watch.userId} via ${channel.type}: ${notifiedSlots.length} slots`
-        );
+          console.log(
+            `Notified user ${watch.userId} via ${channel.type}: ${notifiedSlots.length} slots`
+          );
+        }
       } catch (error) {
         console.error(
           `Failed to notify user ${watch.userId} via ${channel.type}:`,
           error
         );
+        // Don't log as sent if there was an error
       }
     }
   }

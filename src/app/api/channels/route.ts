@@ -44,9 +44,27 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!["telegram", "email", "whatsapp"].includes(type)) {
+  // Validate destination is a string type
+  if (typeof destination !== "string") {
     return NextResponse.json(
-      { error: "type must be telegram, email, or whatsapp" },
+      { error: "destination must be a string" },
+      { status: 400 }
+    );
+  }
+
+  // Validate destination: must be non-empty after trimming whitespace
+  const trimmedDestination = destination.trim();
+  if (trimmedDestination === "") {
+    return NextResponse.json(
+      { error: "destination cannot be empty or whitespace-only" },
+      { status: 400 }
+    );
+  }
+
+  // Only allow telegram and email (whatsapp not yet implemented)
+  if (!["telegram", "email"].includes(type)) {
+    return NextResponse.json(
+      { error: "type must be telegram or email. WhatsApp support is not yet available." },
       { status: 400 }
     );
   }
@@ -56,10 +74,18 @@ export async function POST(request: Request) {
     .values({
       userId,
       type,
-      destination,
+      destination: trimmedDestination,
       active: 1,
     })
     .returning();
 
-  return NextResponse.json({ channel });
+  // Filter response to only safe fields (same as GET endpoint)
+  return NextResponse.json({
+    channel: {
+      id: channel.id,
+      type: channel.type,
+      destination: channel.destination,
+      active: Boolean(channel.active),
+    },
+  });
 }

@@ -61,7 +61,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-xxxxx
 # Email via Resend (HTTP API - works on Railway/cloud)
 # Sign up at https://resend.com (free: 3000 emails/month)
 RESEND_API_KEY=re_xxxxxxxxxxxx
-EMAIL_FROM=Tennis Court Notifier <onboarding@resend.dev>
+EMAIL_FROM=Time for Tennis <hello@timefor10s.com>
 
 # Auth secret (generate a random string)
 AUTH_SECRET=your-random-secret-here
@@ -82,11 +82,63 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 1. Open Telegram and message [@BotFather](https://t.me/BotFather)
 2. Send `/newbot` and follow prompts
 3. Copy the token to `TELEGRAM_BOT_TOKEN`
-4. To get your chat ID, message the bot, then visit:
-   ```
-   https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates
-   ```
-   Look for `"chat":{"id":123456789}` in the response
+4. **Set up the webhook** (see [Telegram Webhook Setup](#telegram-webhook-setup) below)
+5. To get your chat ID, message your bot (e.g., [@MvgMonitorBot](https://t.me/MvgMonitorBot)) - it will automatically respond with your Chat ID
+
+---
+
+## Telegram Webhook Setup
+
+The Telegram bot requires a webhook to be configured so it can receive messages from users and respond with their Chat ID.
+
+### Quick Setup
+
+After deploying your app, run:
+
+```bash
+npx tsx scripts/setup-telegram-webhook.ts
+```
+
+**Requirements:**
+- `TELEGRAM_BOT_TOKEN` must be set in environment
+- `NEXT_PUBLIC_APP_URL` or `AUTH_URL` must be set to your deployed app URL
+- The webhook endpoint must be publicly accessible
+
+### What It Does
+
+The setup script:
+1. Checks if the webhook is already configured correctly
+2. Only updates the webhook if the URL has changed or isn't set
+3. Verifies the configuration and shows any errors
+
+### When to Run It
+
+You **only need to run it:**
+- Once after initial deployment
+- If you change your app URL (`NEXT_PUBLIC_APP_URL`)
+- If you need to reset/update the webhook
+
+The webhook persists on Telegram's servers, so you don't need to run it every time you deploy.
+
+### Testing
+
+1. Message your bot: [@MvgMonitorBot](https://t.me/MvgMonitorBot)
+2. Send any message (e.g., "Hello")
+3. The bot will respond with your Chat ID and a link to the dashboard
+4. Use that Chat ID when creating a Telegram notification channel
+
+### Troubleshooting
+
+**Bot not responding:**
+- Run the webhook setup script: `npx tsx scripts/setup-telegram-webhook.ts`
+- Check webhook status: `curl https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo`
+- Verify your app URL is accessible: `curl https://your-app.railway.app/api/telegram/webhook`
+- Check deployment logs for errors
+
+**Webhook errors:**
+- Ensure `NEXT_PUBLIC_APP_URL` matches your actual deployment URL
+- Verify the `/api/telegram/webhook` endpoint is deployed
+- Check that `TELEGRAM_BOT_TOKEN` is correct
 
 ---
 
@@ -357,7 +409,7 @@ Schedule: */10 7-22 * * *
    - `CRON_SECRET=your-secret`
    - `TELEGRAM_BOT_TOKEN=your-token`
    - `RESEND_API_KEY=your-resend-api-key`
-   - `EMAIL_FROM=Tennis Court Notifier <onboarding@resend.dev>`
+   - `EMAIL_FROM=Time for Tennis <hello@timefor10s.com>` (must be verified domain)
    - `AUTH_SECRET=your-auth-secret`
    - `AUTH_URL=https://your-app.railway.app`
    - `NEXT_PUBLIC_APP_URL=https://your-app.railway.app`
@@ -366,6 +418,12 @@ Schedule: */10 7-22 * * *
    ```bash
    railway up
    ```
+
+6. **Set up Telegram webhook** (after deployment):
+   ```bash
+   npx tsx scripts/setup-telegram-webhook.ts
+   ```
+   See [Telegram Webhook Setup](#telegram-webhook-setup) for details.
 
 ### Vercel
 
@@ -496,9 +554,13 @@ SQLite uses WAL mode for better concurrency, but heavy writes can still cause lo
 
 ### Telegram bot not responding
 
-1. Verify token with: `curl https://api.telegram.org/bot<TOKEN>/getMe`
-2. Check chat ID is correct
-3. Ensure you've started a conversation with the bot
+1. **Set up the webhook** (see [Telegram Webhook Setup](#telegram-webhook-setup) section)
+2. Verify token with: `curl https://api.telegram.org/bot<TOKEN>/getMe`
+3. Check webhook status: `curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo`
+4. Run webhook setup script: `npx tsx scripts/setup-telegram-webhook.ts`
+5. Message the bot to get your Chat ID (it will respond automatically)
+6. Ensure you've started a conversation with the bot
+7. Check deployment logs for webhook errors
 
 ---
 
@@ -527,8 +589,9 @@ src/
 │       ├── email.ts          # Email via Resend HTTP API
 │       └── telegram.ts       # Telegram Bot API
 ├── scripts/
-│   ├── seed.ts               # Database seeding
-│   └── test-scraper.ts       # Scraper testing
+│   ├── seed.ts                    # Database seeding
+│   ├── test-scraper.ts            # Scraper testing
+│   └── setup-telegram-webhook.ts  # Telegram webhook setup
 └── data/
     └── tennis.db             # SQLite database
 ```
