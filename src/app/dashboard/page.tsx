@@ -4,7 +4,33 @@ import { Suspense, useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { VENUES } from "@/lib/constants";
+import { VENUES, type Venue } from "@/lib/constants";
+
+// Helper function to get booking URL for a venue
+function getBookingUrl(venueSlug: string, date?: string): string {
+  const venue = VENUES.find((v) => v.slug === venueSlug);
+  if (!venue) return "#";
+
+  if (venue.type === "clubspark" && venue.clubsparkHost && venue.clubsparkId) {
+    // ClubSpark booking URLs with date parameter
+    // For main LTA site (clubspark.lta.org.uk), include venue ID in path
+    const isMainLtaSite = venue.clubsparkHost === "clubspark.lta.org.uk";
+    const basePath = isMainLtaSite 
+      ? `https://${venue.clubsparkHost}/${venue.clubsparkId}/Booking/BookByDate`
+      : `https://${venue.clubsparkHost}/Booking/BookByDate`;
+    
+    if (date) {
+      return `${basePath}#?date=${date}`;
+    }
+    return basePath;
+  }
+  
+  // Courtside venues
+  if (date) {
+    return `https://tennistowerhamlets.com/book/courts/${venueSlug}/${date}`;
+  }
+  return `https://tennistowerhamlets.com/book/courts/${venueSlug}`;
+}
 
 interface Slot {
   time: string;
@@ -430,7 +456,7 @@ function DashboardContent() {
         <div>
           <h1 className="text-3xl font-bold mb-2">Tennis Court Availability</h1>
           <p className="text-gray-600 dark:text-gray-400">
-            Tower Hamlets tennis courts
+            London tennis courts
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -595,7 +621,7 @@ function DashboardContent() {
                           return (
                             <a
                               key={`${slot.time}-${slot.court}`}
-                              href={`https://tennistowerhamlets.com/book/courts/${selectedVenue}/${selectedDate}`}
+                              href={getBookingUrl(selectedVenue, selectedDate)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={`${baseClasses} hover:opacity-90 cursor-pointer transition-opacity`}
@@ -640,12 +666,12 @@ function DashboardContent() {
               Ready to book?
             </p>
             <a
-              href={`https://tennistowerhamlets.com/book/courts/${selectedVenue}/${selectedDate}`}
+              href={getBookingUrl(selectedVenue, selectedDate)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-block px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
             >
-              Book on Courtside
+              Book Now
             </a>
           </div>
         </>

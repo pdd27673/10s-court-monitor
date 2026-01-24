@@ -57,7 +57,7 @@ export function formatSlotChangesForTelegram(changes: SlotChange[]): string {
     lines.push("");
   }
 
-  lines.push("🔗 Book now: tennistowerhamlets.com/courts");
+  lines.push("🔗 Book online to reserve your slot");
 
   return lines.join("\n");
 }

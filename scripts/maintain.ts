@@ -33,7 +33,8 @@ import {
   notificationLog,
 } from "../src/lib/schema";
 import { eq, lt, sql, count, desc } from "drizzle-orm";
-import { scrapeVenue, getNextNDays } from "../src/lib/scraper";
+import { getNextNDays } from "../src/lib/scraper";
+import { scrapeVenue } from "../src/lib/scrapers";
 import { VENUES } from "../src/lib/constants";
 import { sendEmail } from "../src/lib/notifiers/email";
 import { sendTelegramMessage } from "../src/lib/notifiers/telegram";
@@ -755,8 +756,15 @@ async function runScrape() {
 
   if (venueSlug) {
     // Scrape single venue
-    log(`Scraping ${venueSlug} for ${date}...`, "dim");
-    const scrapedSlots = await scrapeVenue(venueSlug, date);
+    const venue = VENUES.find((v) => v.slug === venueSlug);
+    if (!venue) {
+      log(`Venue not found: ${venueSlug}`, "red");
+      log(`Available venues: ${VENUES.map((v) => v.slug).join(", ")}`, "dim");
+      return;
+    }
+
+    log(`Scraping ${venue.name} for ${date}...`, "dim");
+    const scrapedSlots = await scrapeVenue(venue, date);
     log(`✓ Found ${scrapedSlots.length} slots`, "green");
 
     const available = scrapedSlots.filter((s) => s.status === "available");
@@ -776,7 +784,7 @@ async function runScrape() {
     for (const venue of VENUES) {
       for (const d of getNextNDays(7)) {
         try {
-          const scrapedSlots = await scrapeVenue(venue.slug, d);
+          const scrapedSlots = await scrapeVenue(venue, d);
           totalSlots += scrapedSlots.length;
           totalAvailable += scrapedSlots.filter((s) => s.status === "available").length;
           process.stdout.write(".");

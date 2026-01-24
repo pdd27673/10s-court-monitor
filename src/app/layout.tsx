@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Time for Tennis",
-  description: "Get notified when tennis courts become available in Tower Hamlets",
+  description: "Get notified when tennis courts become available across London",
   icons: {
     icon: "/icon.svg",
   },

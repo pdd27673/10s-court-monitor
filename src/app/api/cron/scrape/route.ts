@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { scrapeVenue, getNextNDays } from "@/lib/scraper";
+import { getNextNDays } from "@/lib/scraper";
+import { scrapeVenue } from "@/lib/scrapers";
 import { VENUES } from "@/lib/constants";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
 import { notifyUsers } from "@/lib/notifiers";
@@ -25,7 +26,7 @@ async function runScrapeJob() {
       for (const date of dates) {
         try {
           console.log(`Scraping ${venue.slug} for ${date}...`);
-          const slots = await scrapeVenue(venue.slug, date);
+          const slots = await scrapeVenue(venue, date);
           allSlots.push(...slots);
         } catch (error) {
           console.error(`Error scraping ${venue.slug} ${date}:`, error);
