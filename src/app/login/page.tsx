@@ -39,7 +39,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8">
         <div>
           <h1 className="text-3xl font-bold text-center ">
-            🎾 Tennis Court Notifier
+            🎾 Time for Tennis
           </h1>
           <h2 className="mt-6 text-center text-xl ">
             Sign in with your email

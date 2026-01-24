@@ -12,6 +12,7 @@ export const users = sqliteTable("users", {
   emailVerified: text("email_verified"), // Required by NextAuth
   image: text("image"), // Required by NextAuth
   isAllowed: integer("is_allowed").default(0), // Allowlist: 1 = can log in
+  isAdmin: integer("is_admin").default(0), // Admin: 1 = can access admin dashboard
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -57,6 +58,17 @@ export const notificationLog = sqliteTable("notification_log", {
   sentAt: text("sent_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const registrationRequests = sqliteTable("registration_requests", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  email: text("email").notNull(),
+  name: text("name"),
+  reason: text("reason"), // Why they want access
+  status: text("status").default("pending"), // pending | approved | rejected
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  reviewedAt: text("reviewed_at"),
+  reviewedBy: integer("reviewed_by").references(() => users.id), // Admin user ID who reviewed
+});
+
 // ============================================
 // NextAuth tables (JWT sessions - no sessions table needed)
 // ============================================
@@ -84,3 +96,4 @@ export type Watch = typeof watches.$inferSelect;
 export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type NotificationLogEntry = typeof notificationLog.$inferSelect;
 export type VerificationToken = typeof verificationTokens.$inferSelect;
+export type RegistrationRequest = typeof registrationRequests.$inferSelect;

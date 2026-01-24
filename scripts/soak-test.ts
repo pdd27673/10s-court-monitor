@@ -28,7 +28,8 @@ import {
   notificationLog,
 } from "../src/lib/schema";
 import { eq, sql, count } from "drizzle-orm";
-import { scrapeVenue, getNextNDays } from "../src/lib/scraper";
+import { getNextNDays } from "../src/lib/scraper";
+import { scrapeVenue } from "../src/lib/scrapers";
 import { VENUES } from "../src/lib/constants";
 import { ensureVenuesExist, storeAndDiff } from "../src/lib/differ";
 import { notifyUsers } from "../src/lib/notifiers";
@@ -99,8 +100,8 @@ async function testDatabaseConnection() {
 async function testVenueSetup() {
   await ensureVenuesExist();
   const venueCount = await db.select({ count: count() }).from(venues);
-  if (venueCount[0].count !== 7) {
-    throw new Error(`Expected 7 venues, got ${venueCount[0].count}`);
+  if (venueCount[0].count !== VENUES.length) {
+    throw new Error(`Expected ${VENUES.length} venues, got ${venueCount[0].count}`);
   }
 }
 
@@ -111,7 +112,7 @@ async function testScrapeAllVenues(): Promise<ScrapedSlot[]> {
   for (const venue of VENUES) {
     for (const date of dates) {
       try {
-        const scraped = await scrapeVenue(venue.slug, date);
+        const scraped = await scrapeVenue(venue, date);
         allSlots.push(...scraped);
         if (verbose) {
           log(`  ${venue.slug}/${date}: ${scraped.length} slots`, c.dim);
@@ -268,7 +269,8 @@ async function testNotificationDeduplication() {
 
 async function testFullPipeline(dryRunMode: boolean) {
   // Scrape fresh data
-  const freshSlots = await scrapeVenue("victoria-park", getNextNDays(1)[0]);
+  const victoriaPark = VENUES.find((v) => v.slug === "victoria-park")!;
+  const freshSlots = await scrapeVenue(victoriaPark, getNextNDays(1)[0]);
 
   if (freshSlots.length === 0) {
     throw new Error("No slots scraped for pipeline test");
@@ -298,10 +300,11 @@ async function testAPIEndpoints() {
     const venuesRes = await fetch(`${baseUrl}/api/venues`);
     if (!venuesRes.ok) throw new Error(`Venues API returned ${venuesRes.status}`);
     const venuesData = await venuesRes.json();
-    if (!Array.isArray(venuesData) || venuesData.length !== 7) {
-      throw new Error(`Expected 7 venues, got ${venuesData.length}`);
+    const venuesArray = venuesData.venues || venuesData;
+    if (!Array.isArray(venuesArray) || venuesArray.length !== VENUES.length) {
+      throw new Error(`Expected ${VENUES.length} venues, got ${venuesArray.length}`);
     }
-    if (verbose) log(`  /api/venues: OK (${venuesData.length} venues)`, c.dim);
+    if (verbose) log(`  /api/venues: OK (${venuesArray.length} venues)`, c.dim);
   } catch (e) {
     if (verbose) log(`  /api/venues: ${e}`, c.yellow);
   }

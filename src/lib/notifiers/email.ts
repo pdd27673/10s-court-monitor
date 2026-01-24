@@ -95,7 +95,7 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
 
   html += `
       <p style="margin-top: 24px;">
-        <a href="https://tennistowerhamlets.com/courts"
+        <a href="https://tennistowerhamlets.com/courts" style="color: #10b981;"
            style="display: inline-block; padding: 12px 24px; background: #16a34a; color: white; text-decoration: none; border-radius: 6px; font-weight: 500;">
           Book Now
         </a>

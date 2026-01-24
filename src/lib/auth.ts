@@ -45,10 +45,10 @@ function ResendProvider(): Provider {
       const result = await resend.emails.send({
         from: EMAIL_FROM,
         to: email,
-        subject: "Sign in to Tennis Court Notifier",
+        subject: "Sign in to Time for Tennis",
         html: `
           <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto;">
-            <h2>Sign in to Tennis Court Notifier</h2>
+            <h2>Sign in to Time for Tennis</h2>
             <p>Click the button below to sign in:</p>
             <a href="${url}" style="display: inline-block; background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 16px 0;">
               Sign in

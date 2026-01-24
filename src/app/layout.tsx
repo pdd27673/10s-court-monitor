@@ -3,8 +3,8 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tennis Court Notifier",
-  description: "Get notified when tennis courts become available in Tower Hamlets",
+  title: "Time for Tennis",
+  description: "Get notified when tennis courts become available across London",
   icons: {
     icon: "/icon.svg",
   },

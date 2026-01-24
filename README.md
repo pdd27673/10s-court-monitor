@@ -1,6 +1,6 @@
 # Tennis Court Notifier
 
-A notification service that monitors tennis court availability on Courtside Tower Hamlets and alerts users via Telegram or Email when slots become available.
+A notification service that monitors tennis court availability across London venues (Courtside and ClubSpark platforms) and alerts users via Telegram or Email when slots become available.
 
 ## Table of Contents
 
@@ -163,7 +163,7 @@ npm run db:studio
 ### Database Schema
 
 - **users** - User accounts (email)
-- **venues** - Tennis court venues (7 Tower Hamlets locations)
+- **venues** - Tennis court venues (10 London locations across Tower Hamlets, Waltham Forest, and Newham)
 - **slots** - Court availability (time, court, status, price)
 - **watches** - User alert preferences (venue, times, weekday filters)
 - **notification_channels** - Where to send alerts (telegram, email)
@@ -313,7 +313,7 @@ npx tsx scripts/test-scraper.ts
 
 ### What the Scraper Does
 
-1. Fetches availability from all 7 venues for the next 7 days
+1. Fetches availability from all 10 venues for the next 7 days
 2. Parses HTML using Cheerio (no browser needed)
 3. Stores slots in database
 4. Detects newly available slots (was booked -> now available)

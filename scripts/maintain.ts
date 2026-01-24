@@ -13,6 +13,7 @@
  *   add-user        Add a new user (interactive or with args)
  *   edit-user       Edit an existing user's preferences (interactive)
  *   allow-user      Add email to allowlist (can log into dashboard)
+ *   set-admin       Make a user an admin
  *   delete-user     Delete a user and all their data
  *   cleanup         Clean up old data (slots, logs)
  *   test-notify     Send a test notification to a user
@@ -33,7 +34,8 @@ import {
   notificationLog,
 } from "../src/lib/schema";
 import { eq, lt, sql, count, desc } from "drizzle-orm";
-import { scrapeVenue, getNextNDays } from "../src/lib/scraper";
+import { getNextNDays } from "../src/lib/scraper";
+import { scrapeVenue } from "../src/lib/scrapers";
 import { VENUES } from "../src/lib/constants";
 import { sendEmail } from "../src/lib/notifiers/email";
 import { sendTelegramMessage } from "../src/lib/notifiers/telegram";
@@ -630,6 +632,33 @@ async function allowUser() {
   }
 }
 
+async function setAdmin() {
+  header("Set Admin");
+
+  const email = args[1];
+  if (!email) {
+    log("Usage: npx tsx scripts/maintain.ts set-admin <email>", "yellow");
+    process.exit(1);
+  }
+
+  // Check if user exists
+  const existing = await db.select().from(users).where(eq(users.email, email));
+
+  if (existing.length > 0) {
+    // Update existing user
+    await db.update(users).set({ isAdmin: 1, isAllowed: 1 }).where(eq(users.email, email));
+    log(`✓ User ${email} is now an admin (and allowed to log in)`, "green");
+  } else {
+    // Create new user with admin and allowlist
+    const [user] = await db
+      .insert(users)
+      .values({ email, isAdmin: 1, isAllowed: 1 })
+      .returning();
+    log(`✓ Created admin user ${email} (ID: ${user.id})`, "green");
+    log(`Admin can now access /admin after logging in`, "dim");
+  }
+}
+
 async function deleteUser() {
   header("Delete User");
 
@@ -755,8 +784,15 @@ async function runScrape() {
 
   if (venueSlug) {
     // Scrape single venue
-    log(`Scraping ${venueSlug} for ${date}...`, "dim");
-    const scrapedSlots = await scrapeVenue(venueSlug, date);
+    const venue = VENUES.find((v) => v.slug === venueSlug);
+    if (!venue) {
+      log(`Venue not found: ${venueSlug}`, "red");
+      log(`Available venues: ${VENUES.map((v) => v.slug).join(", ")}`, "dim");
+      return;
+    }
+
+    log(`Scraping ${venue.name} for ${date}...`, "dim");
+    const scrapedSlots = await scrapeVenue(venue, date);
     log(`✓ Found ${scrapedSlots.length} slots`, "green");
 
     const available = scrapedSlots.filter((s) => s.status === "available");
@@ -776,7 +812,7 @@ async function runScrape() {
     for (const venue of VENUES) {
       for (const d of getNextNDays(7)) {
         try {
-          const scrapedSlots = await scrapeVenue(venue.slug, d);
+          const scrapedSlots = await scrapeVenue(venue, d);
           totalSlots += scrapedSlots.length;
           totalAvailable += scrapedSlots.filter((s) => s.status === "available").length;
           process.stdout.write(".");
@@ -914,6 +950,7 @@ ${colors.cyan}Commands:${colors.reset}
   add-user <email> [chat-id]  Add a new user (quick mode)
   edit-user                   Edit an existing user's preferences
   allow-user <email>          Add email to allowlist for dashboard login
+  set-admin <email>           Make a user an admin (can access /admin)
   delete-user <email-or-id>   Delete a user and all their data
   cleanup [days]              Remove data older than N days (default: 14)
   test-notify <user-id>       Send test notification to a user
@@ -928,6 +965,7 @@ ${colors.cyan}Examples:${colors.reset}
   npx tsx scripts/maintain.ts add-user john@example.com 123456789
   npx tsx scripts/maintain.ts edit-user                 # Interactive
   npx tsx scripts/maintain.ts allow-user jane@example.com
+  npx tsx scripts/maintain.ts set-admin admin@example.com
   npx tsx scripts/maintain.ts cleanup 7
   npx tsx scripts/maintain.ts test-notify 1
   npx tsx scripts/maintain.ts scrape victoria-park 2025-01-22
@@ -952,6 +990,9 @@ async function main() {
       break;
     case "allow-user":
       await allowUser();
+      break;
+    case "set-admin":
+      await setAdmin();
       break;
     case "delete-user":
       await deleteUser();
