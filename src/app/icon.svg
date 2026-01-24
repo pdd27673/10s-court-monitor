@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Tennis ball base (yellow-green) -->
+  <circle cx="50" cy="50" r="45" fill="#CFFF04" stroke="#B8E600" stroke-width="2"/>
+  
+  <!-- Curved seam lines (characteristic tennis ball pattern) -->
+  <!-- Top curve -->
+  <path d="M 20 30 Q 50 20 80 30" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <!-- Bottom curve -->
+  <path d="M 20 70 Q 50 80 80 70" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+  
+  <!-- Left side curve -->
+  <path d="M 30 20 Q 20 50 30 80" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <!-- Right side curve -->
+  <path d="M 70 20 Q 80 50 70 80" stroke="#FFFFFF" stroke-width="3" fill="none" stroke-linecap="round"/>
+  
+  <!-- Highlight for 3D effect -->
+  <ellipse cx="40" cy="35" rx="8" ry="12" fill="#E8FF66" opacity="0.6"/>
+</svg>

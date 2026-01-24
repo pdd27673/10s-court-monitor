@@ -5,6 +5,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Tennis Court Notifier",
   description: "Get notified when tennis courts become available in Tower Hamlets",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
