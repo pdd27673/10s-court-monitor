@@ -24,7 +24,7 @@ function ResendProvider(): Provider {
         throw new Error("RESEND_API_KEY is not configured");
       }
       const result = await resend.emails.send({
-        from: process.env.EMAIL_FROM || "Tennis Court Notifier <onboarding@resend.dev>",
+        from: process.env.EMAIL_FROM || "Time for Tennis <hello@timefor10s.com>",
         to: email,
         subject: "Sign in to Tennis Court Notifier",
         html: `

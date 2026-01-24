@@ -346,29 +346,50 @@ function DashboardContent() {
                       {time}
                     </span>
                     <div className="flex gap-2 flex-1">
-                      {slots.map((slot) => (
-                        <div
-                          key={`${slot.time}-${slot.court}`}
-                          className={`flex-1 px-3 py-2 rounded text-center text-sm ${getStatusColor(slot.status)} ${
-                            slot.status === "available"
-                              ? "text-white font-medium"
-                              : slot.status === "booked"
-                                ? "text-white"
-                                : "text-gray-600"
-                          }`}
-                        >
-                          <div>{slot.court}</div>
-                          {slot.status === "available" && slot.price && (
-                            <div className="text-xs opacity-90">{slot.price}</div>
-                          )}
-                          {slot.status === "booked" && (
-                            <div className="text-xs opacity-75">Booked</div>
-                          )}
-                          {slot.status === "closed" && (
-                            <div className="text-xs opacity-75">Closed</div>
-                          )}
-                        </div>
-                      ))}
+                      {slots.map((slot) => {
+                        const baseClasses = `flex-1 px-3 py-2 rounded text-center text-sm ${getStatusColor(slot.status)} ${
+                          slot.status === "available"
+                            ? "text-white font-medium"
+                            : slot.status === "booked"
+                              ? "text-white"
+                              : "text-gray-600"
+                        }`;
+
+                        const content = (
+                          <>
+                            <div>{slot.court}</div>
+                            {slot.status === "available" && slot.price && (
+                              <div className="text-xs opacity-90">{slot.price}</div>
+                            )}
+                            {slot.status === "booked" && (
+                              <div className="text-xs opacity-75">Booked</div>
+                            )}
+                            {slot.status === "closed" && (
+                              <div className="text-xs opacity-75">Closed</div>
+                            )}
+                          </>
+                        );
+
+                        if (slot.status === "available") {
+                          return (
+                            <a
+                              key={`${slot.time}-${slot.court}`}
+                              href={`https://tennistowerhamlets.com/book/courts/${selectedVenue}/${selectedDate}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`${baseClasses} hover:opacity-90 cursor-pointer transition-opacity`}
+                            >
+                              {content}
+                            </a>
+                          );
+                        }
+
+                        return (
+                          <div key={`${slot.time}-${slot.court}`} className={baseClasses}>
+                            {content}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}

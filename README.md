@@ -61,7 +61,7 @@ TELEGRAM_BOT_TOKEN=123456:ABC-xxxxx
 # Email via Resend (HTTP API - works on Railway/cloud)
 # Sign up at https://resend.com (free: 3000 emails/month)
 RESEND_API_KEY=re_xxxxxxxxxxxx
-EMAIL_FROM=Tennis Court Notifier <onboarding@resend.dev>
+EMAIL_FROM=Time for Tennis <hello@timefor10s.com>
 
 # Auth secret (generate a random string)
 AUTH_SECRET=your-random-secret-here
@@ -357,7 +357,7 @@ Schedule: */10 7-22 * * *
    - `CRON_SECRET=your-secret`
    - `TELEGRAM_BOT_TOKEN=your-token`
    - `RESEND_API_KEY=your-resend-api-key`
-   - `EMAIL_FROM=Tennis Court Notifier <onboarding@resend.dev>`
+   - `EMAIL_FROM=Time for Tennis <hello@timefor10s.com>`
    - `AUTH_SECRET=your-auth-secret`
    - `AUTH_URL=https://your-app.railway.app`
    - `NEXT_PUBLIC_APP_URL=https://your-app.railway.app`
