@@ -687,6 +687,33 @@ function DashboardContent() {
                   />
                   <div className="absolute z-20 w-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg max-h-64 overflow-y-auto">
                     <div className="p-2">
+                      {/* Select All Checkbox */}
+                      <label
+                        className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-200 dark:border-gray-700 mb-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedVenues.length === VENUES.length}
+                          ref={(input) => {
+                            if (input) {
+                              input.indeterminate = selectedVenues.length > 0 && selectedVenues.length < VENUES.length;
+                            }
+                          }}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedVenues(VENUES.map(v => v.slug));
+                            } else {
+                              setSelectedVenues([VENUES[0].slug]);
+                            }
+                          }}
+                          className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          All Venues
+                        </span>
+                      </label>
+
                       {VENUES.map((venue) => {
                         const isSelected = selectedVenues.includes(venue.slug);
                         return (
