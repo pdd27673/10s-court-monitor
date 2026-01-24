@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { slots, venues } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -29,6 +29,12 @@ export async function GET(request: Request) {
     where: and(eq(slots.venueId, venue.id), eq(slots.date, date)),
   });
 
+  // Get the most recent updatedAt timestamp
+  const mostRecentSlot = await db.query.slots.findFirst({
+    where: eq(slots.venueId, venue.id),
+    orderBy: desc(slots.updatedAt),
+  });
+
   return NextResponse.json({
     venue: {
       slug: venue.slug,
@@ -41,5 +47,6 @@ export async function GET(request: Request) {
       status: s.status,
       price: s.price,
     })),
+    lastUpdated: mostRecentSlot?.updatedAt || null,
   });
 }

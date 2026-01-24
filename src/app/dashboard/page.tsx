@@ -43,6 +43,7 @@ interface VenueAvailability {
   venue: { slug: string; name: string };
   date: string;
   slots: Slot[];
+  lastUpdated: string | null;
 }
 
 interface Watch {
@@ -618,10 +619,30 @@ function DashboardContent() {
           {/* Availability grid */}
           <div className="border rounded-lg overflow-hidden dark:border-gray-700">
             <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b dark:border-gray-700">
-              <h2 className="font-semibold">
-                {availability?.venue?.name ?? "Loading..."}
-              </h2>
-              <p className="text-sm text-gray-500">{formatDate(selectedDate)}</p>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="font-semibold">
+                    {availability?.venue?.name ?? "Loading..."}
+                  </h2>
+                  <p className="text-sm text-gray-500">{formatDate(selectedDate)}</p>
+                </div>
+                {availability?.lastUpdated && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-full border border-gray-200 dark:border-gray-600">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                      Updated {new Date(availability.lastUpdated).toLocaleString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
 
             {loading ? (
