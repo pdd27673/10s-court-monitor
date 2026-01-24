@@ -100,6 +100,45 @@ function formatDate(dateStr: string): string {
   });
 }
 
+// localStorage utility helpers for dashboard preferences
+const STORAGE_KEY = "dashboard-preferences";
+
+interface DashboardPreferences {
+  selectedVenues: string[];
+  selectedDate?: string;
+  activeTab?: "availability" | "settings" | "admin";
+}
+
+function saveDashboardPreferences(prefs: Partial<DashboardPreferences>) {
+  try {
+    const existing = loadDashboardPreferences();
+    const updated = { ...existing, ...prefs };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  } catch (error) {
+    console.error("Failed to save preferences:", error);
+  }
+}
+
+function loadDashboardPreferences(): DashboardPreferences {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const prefs = JSON.parse(stored);
+      // Validate venues still exist
+      if (prefs.selectedVenues) {
+        const validVenues = prefs.selectedVenues.filter((slug: string) => 
+          VENUES.some(v => v.slug === slug)
+        );
+        prefs.selectedVenues = validVenues.length > 0 ? validVenues : [VENUES[0].slug];
+      }
+      return prefs;
+    }
+  } catch (error) {
+    console.error("Failed to load preferences:", error);
+  }
+  return { selectedVenues: [VENUES[0].slug] };
+}
+
 function DashboardContent() {
   const { status, data: session } = useSession();
   const router = useRouter();
@@ -110,8 +149,26 @@ function DashboardContent() {
   console.log("[Dashboard] isGuest:", isGuest);
   console.log("[Dashboard] session status:", status);
 
-  const [selectedVenues, setSelectedVenues] = useState<string[]>([VENUES[0].slug]);
-  const [selectedDate, setSelectedDate] = useState(getNext7Days()[0]);
+  // Initialize from localStorage with validation
+  const [selectedVenues, setSelectedVenues] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const prefs = loadDashboardPreferences();
+      return prefs.selectedVenues.length > 0 ? prefs.selectedVenues : [VENUES[0].slug];
+    }
+    return [VENUES[0].slug];
+  });
+
+  const [selectedDate, setSelectedDate] = useState(() => {
+    if (typeof window !== "undefined") {
+      const prefs = loadDashboardPreferences();
+      const dates = getNext7Days();
+      return prefs.selectedDate && dates.includes(prefs.selectedDate) 
+        ? prefs.selectedDate 
+        : dates[0];
+    }
+    return getNext7Days()[0];
+  });
+
   const [availability, setAvailability] = useState<VenueAvailability | null>(
     null
   );
@@ -124,11 +181,18 @@ function DashboardContent() {
   const [loadingWatches, setLoadingWatches] = useState(false);
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
-  // Initialize activeTab from URL or default to availability
+  
+  // Initialize activeTab from URL or localStorage
   const tabFromUrl = searchParams.get("tab") as "availability" | "settings" | "admin" | null;
-  const [activeTab, setActiveTab] = useState<"availability" | "settings" | "admin">(
-    tabFromUrl === "admin" ? "admin" : tabFromUrl === "settings" ? "settings" : "availability"
-  );
+  const [activeTab, setActiveTab] = useState<"availability" | "settings" | "admin">(() => {
+    if (tabFromUrl) return tabFromUrl === "admin" ? "admin" : tabFromUrl === "settings" ? "settings" : "availability";
+    
+    if (typeof window !== "undefined") {
+      const prefs = loadDashboardPreferences();
+      return prefs.activeTab || "availability";
+    }
+    return "availability";
+  });
   
   // Admin sub-tab state
   const adminSubTabFromUrl = searchParams.get("adminTab") as "overview" | "users" | "requests" | "system" | "database" | null;
@@ -189,6 +253,27 @@ function DashboardContent() {
       return () => document.removeEventListener("keydown", handleEscape);
     }
   }, [venueDropdownOpen]);
+
+  // Save venue preferences to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      saveDashboardPreferences({ selectedVenues });
+    }
+  }, [selectedVenues]);
+
+  // Save date preference to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      saveDashboardPreferences({ selectedDate });
+    }
+  }, [selectedDate]);
+
+  // Save active tab preference to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      saveDashboardPreferences({ activeTab });
+    }
+  }, [activeTab]);
 
   // Fetch availability (works for both guests and authenticated users)
   useEffect(() => {
