@@ -75,5 +75,26 @@ export async function POST(request: Request) {
     })
     .returning();
 
-  return NextResponse.json({ watch });
+  // Enrich with venue info and filter response (same format as GET endpoint)
+  let venue = null;
+  if (watch.venueId) {
+    venue = await db.query.venues.findFirst({
+      where: eq(venues.id, watch.venueId),
+    });
+  }
+
+  return NextResponse.json({
+    watch: {
+      id: watch.id,
+      userId: watch.userId,
+      venue: venue ? { slug: venue.slug, name: venue.name } : null,
+      weekdayTimes: watch.weekdayTimes
+        ? JSON.parse(watch.weekdayTimes)
+        : null,
+      weekendTimes: watch.weekendTimes
+        ? JSON.parse(watch.weekendTimes)
+        : null,
+      active: Boolean(watch.active),
+    },
+  });
 }

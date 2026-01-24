@@ -6,14 +6,32 @@ const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
 
+// Validate EMAIL_FROM is set at module load time
+const EMAIL_FROM = process.env.EMAIL_FROM;
+if (resend && !EMAIL_FROM) {
+  console.error(
+    "ERROR: EMAIL_FROM environment variable is not set. " +
+    "Email notifications will fail. " +
+    "Please set EMAIL_FROM to a verified domain in your Resend account (e.g., 'Your App <noreply@yourdomain.com>')."
+  );
+}
+
 export async function sendEmail(to: string, subject: string, html: string) {
   if (!resend) {
     console.warn("RESEND_API_KEY not set, skipping email notification");
     return;
   }
 
+  if (!EMAIL_FROM) {
+    throw new Error(
+      "EMAIL_FROM environment variable is not set. " +
+      "Please configure EMAIL_FROM with a verified domain in your Resend account. " +
+      "Example: EMAIL_FROM='Your App <noreply@yourdomain.com>'"
+    );
+  }
+
   const result = await resend.emails.send({
-    from: process.env.EMAIL_FROM || "Time for Tennis <hello@timefor10s.com>",
+    from: EMAIL_FROM,
     to,
     subject,
     html,
