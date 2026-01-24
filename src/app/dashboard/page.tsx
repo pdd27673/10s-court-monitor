@@ -33,6 +33,8 @@ function getBookingUrl(venueSlug: string, date?: string): string {
 }
 
 interface Slot {
+  venueSlug?: string;
+  venueName?: string;
   time: string;
   court: string;
   status: "available" | "booked" | "closed";
@@ -40,7 +42,8 @@ interface Slot {
 }
 
 interface VenueAvailability {
-  venue: { slug: string; name: string };
+  venues?: { slug: string; name: string }[];
+  venue?: { slug: string; name: string }; // Keep for backward compatibility
   date: string;
   slots: Slot[];
   lastUpdated: string | null;
@@ -107,12 +110,13 @@ function DashboardContent() {
   console.log("[Dashboard] isGuest:", isGuest);
   console.log("[Dashboard] session status:", status);
 
-  const [selectedVenue, setSelectedVenue] = useState<string>(VENUES[0].slug);
+  const [selectedVenues, setSelectedVenues] = useState<string[]>([VENUES[0].slug]);
   const [selectedDate, setSelectedDate] = useState(getNext7Days()[0]);
   const [availability, setAvailability] = useState<VenueAvailability | null>(
     null
   );
   const [loading, setLoading] = useState(false);
+  const [venueDropdownOpen, setVenueDropdownOpen] = useState(false);
 
   // Management state
   const [watches, setWatches] = useState<Watch[]>([]);
@@ -173,16 +177,31 @@ function DashboardContent() {
     }
   }, [status, router, isGuest]);
 
+  // Close dropdown on Escape key
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setVenueDropdownOpen(false);
+      }
+    };
+    if (venueDropdownOpen) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+  }, [venueDropdownOpen]);
+
   // Fetch availability (works for both guests and authenticated users)
   useEffect(() => {
     if (status === "loading") return;
     if (!isGuest && status !== "authenticated") return;
+    if (selectedVenues.length === 0) return;
 
     async function fetchAvailability() {
       setLoading(true);
       try {
+        const venueParam = selectedVenues.join(",");
         const res = await fetch(
-          `/api/availability?venue=${selectedVenue}&date=${selectedDate}`
+          `/api/availability?venue=${venueParam}&date=${selectedDate}`
         );
         const data = await res.json();
         setAvailability(data);
@@ -194,7 +213,7 @@ function DashboardContent() {
     }
 
     fetchAvailability();
-  }, [selectedVenue, selectedDate, status, isGuest]);
+  }, [selectedVenues, selectedDate, status, isGuest]);
 
   // Define fetch functions outside useEffect so they can be called from handlers
   const fetchWatches = async () => {
@@ -460,14 +479,59 @@ function DashboardContent() {
     }
   };
 
-  // Group slots by time
-  const slotsByTime: Record<string, Slot[]> = {};
+  // Group slots by time and venue, aggregating counts
+  const slotsByTimeAndVenue: Record<string, Record<string, { available: number; booked: number; closed: number }>> = {};
+  const allTimes = new Set<string>();
+  
   if (availability?.slots) {
     for (const slot of availability.slots) {
-      if (!slotsByTime[slot.time]) slotsByTime[slot.time] = [];
-      slotsByTime[slot.time].push(slot);
+      const venueSlug = slot.venueSlug || "";
+      const time = slot.time;
+      allTimes.add(time);
+      
+      if (!slotsByTimeAndVenue[time]) {
+        slotsByTimeAndVenue[time] = {};
+      }
+      if (!slotsByTimeAndVenue[time][venueSlug]) {
+        slotsByTimeAndVenue[time][venueSlug] = { available: 0, booked: 0, closed: 0 };
+      }
+      
+      if (slot.status === "available") {
+        slotsByTimeAndVenue[time][venueSlug].available++;
+      } else if (slot.status === "booked") {
+        slotsByTimeAndVenue[time][venueSlug].booked++;
+      } else if (slot.status === "closed") {
+        slotsByTimeAndVenue[time][venueSlug].closed++;
+      }
     }
   }
+
+  // Get venue info for selected venues
+  const selectedVenueInfo = selectedVenues
+    .map((slug) => {
+      const venue = VENUES.find((v) => v.slug === slug);
+      return venue ? { slug: venue.slug, name: venue.name } : null;
+    })
+    .filter((v): v is { slug: string; name: string } => v !== null);
+
+  // Sort times properly (convert to 24-hour format for comparison)
+  const sortedTimes = Array.from(allTimes).sort((a, b) => {
+    const parseTime = (timeStr: string): number => {
+      const match = timeStr.match(/(\d+)(am|pm)/i);
+      if (!match) return 0;
+      let hours = parseInt(match[1], 10);
+      const period = match[2].toLowerCase();
+      
+      if (period === "pm" && hours !== 12) {
+        hours += 12;
+      } else if (period === "am" && hours === 12) {
+        hours = 0;
+      }
+      return hours;
+    };
+    
+    return parseTime(a) - parseTime(b);
+  });
 
   // Show loading while checking auth (unless guest)
   if (status === "loading" && !isGuest) {
@@ -580,20 +644,118 @@ function DashboardContent() {
       {/* Availability Tab */}
       {(activeTab === "availability" || isGuest) && (
         <>
-          {/* Venue selector */}
+          {/* Venue selector - Multi-select Dropdown */}
           <div className="mb-4">
-            <label className="block text-sm font-medium mb-2">Venue</label>
-            <select
-              value={selectedVenue}
-              onChange={(e) => setSelectedVenue(e.target.value)}
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-700"
-            >
-              {VENUES.map((venue) => (
-                <option key={venue.slug} value={venue.slug}>
-                  {venue.name}
-                </option>
-              ))}
-            </select>
+            <label className="block text-sm font-medium mb-2">
+              Venues (select multiple)
+            </label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setVenueDropdownOpen(!venueDropdownOpen)}
+                className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-700 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {selectedVenues.length === 0
+                    ? "Select venues..."
+                    : selectedVenues.length === 1
+                    ? VENUES.find((v) => v.slug === selectedVenues[0])?.name || "Select venues..."
+                    : `${selectedVenues.length} venues selected`}
+                </span>
+                <svg
+                  className={`w-5 h-5 text-gray-500 transition-transform ${
+                    venueDropdownOpen ? "rotate-180" : ""
+                  }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              {venueDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setVenueDropdownOpen(false)}
+                  />
+                  <div className="absolute z-20 w-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                    <div className="p-2">
+                      {VENUES.map((venue) => {
+                        const isSelected = selectedVenues.includes(venue.slug);
+                        return (
+                          <label
+                            key={venue.slug}
+                            className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedVenues([...selectedVenues, venue.slug]);
+                                } else {
+                                  const newSelection = selectedVenues.filter(
+                                    (v) => v !== venue.slug
+                                  );
+                                  if (newSelection.length > 0) {
+                                    setSelectedVenues(newSelection);
+                                  }
+                                }
+                              }}
+                              className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                              {venue.name}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {selectedVenues.length === 0 && (
+                <p className="text-xs text-red-500 mt-2">
+                  Please select at least one venue
+                </p>
+              )}
+              {selectedVenues.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedVenues.map((venueSlug) => {
+                    const venue = VENUES.find((v) => v.slug === venueSlug);
+                    if (!venue) return null;
+                    return (
+                      <span
+                        key={venueSlug}
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded text-xs"
+                      >
+                        {venue.name}
+                        <button
+                          onClick={() => {
+                            setSelectedVenues(
+                              selectedVenues.filter((v) => v !== venueSlug)
+                            );
+                          }}
+                          className="hover:text-green-600 dark:hover:text-green-300"
+                          aria-label={`Remove ${venue.name}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Date selector */}
@@ -616,14 +778,12 @@ function DashboardContent() {
             </div>
           </div>
 
-          {/* Availability grid */}
+          {/* Availability table */}
           <div className="border rounded-lg overflow-hidden dark:border-gray-700">
             <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b dark:border-gray-700">
               <div className="flex justify-between items-start">
                 <div>
-                  <h2 className="font-semibold">
-                    {availability?.venue?.name ?? "Loading..."}
-                  </h2>
+                  <h2 className="font-semibold">Availability</h2>
                   <p className="text-sm text-gray-500">{formatDate(selectedDate)}</p>
                 </div>
                 {availability?.lastUpdated && (
@@ -647,68 +807,105 @@ function DashboardContent() {
 
             {loading ? (
               <div className="p-8 text-center text-gray-500">Loading...</div>
-            ) : Object.keys(slotsByTime).length === 0 ? (
+            ) : selectedVenueInfo.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                Please select at least one venue
+              </div>
+            ) : sortedTimes.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 No availability data. Run a scrape first.
               </div>
             ) : (
-              <div className="divide-y dark:divide-gray-700">
-                {Object.entries(slotsByTime).map(([time, slots]) => (
-                  <div
-                    key={time}
-                    className="flex items-center px-4 py-3 gap-4"
-                  >
-                    <span className="w-16 font-medium text-gray-700 dark:text-gray-300">
-                      {time}
-                    </span>
-                    <div className="flex gap-2 flex-1">
-                      {slots.map((slot) => {
-                        const baseClasses = `flex-1 px-3 py-2 rounded text-center text-sm ${getStatusColor(slot.status)} ${
-                          slot.status === "available"
-                            ? "text-white font-medium"
-                            : slot.status === "booked"
-                              ? "text-white"
-                              : "text-gray-600"
-                        }`;
+              <div className="overflow-x-auto">
+                <table className="w-full" style={{ tableLayout: "fixed", minWidth: "600px" }}>
+                  <colgroup>
+                    <col style={{ width: "80px" }} />
+                    {selectedVenueInfo.map((venue) => (
+                      <col key={venue.slug} style={{ width: "150px" }} />
+                    ))}
+                  </colgroup>
+                  <thead className="bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300 sticky left-0 bg-gray-50 dark:bg-gray-800 z-10 border-r dark:border-gray-700">
+                        Time
+                      </th>
+                      {selectedVenueInfo.map((venue) => (
+                        <th
+                          key={venue.slug}
+                          className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300"
+                        >
+                          {venue.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y dark:divide-gray-700">
+                    {sortedTimes.map((time) => (
+                      <tr key={time} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                        <td className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300 sticky left-0 bg-white dark:bg-gray-900 z-10 border-r dark:border-gray-700">
+                          {time}
+                        </td>
+                        {selectedVenueInfo.map((venue) => {
+                          const venueData = slotsByTimeAndVenue[time]?.[venue.slug] || {
+                            available: 0,
+                            booked: 0,
+                            closed: 0,
+                          };
+                          const total = venueData.available + venueData.booked + venueData.closed;
+                          const hasAvailable = venueData.available > 0;
+                          const isBooked = venueData.booked > 0 && venueData.available === 0;
+                          const isClosed = total > 0 && venueData.available === 0 && venueData.booked === 0;
 
-                        const content = (
-                          <>
-                            <div>{slot.court}</div>
-                            {slot.status === "available" && slot.price && (
-                              <div className="text-xs opacity-90">{slot.price}</div>
-                            )}
-                            {slot.status === "booked" && (
-                              <div className="text-xs opacity-75">Booked</div>
-                            )}
-                            {slot.status === "closed" && (
-                              <div className="text-xs opacity-75">Closed</div>
-                            )}
-                          </>
-                        );
+                          let statusClass = "bg-gray-100 dark:bg-gray-800 text-gray-600";
+                          let statusText = "No data";
+                          let statusCount = 0;
 
-                        if (slot.status === "available") {
-                          return (
-                            <a
-                              key={`${slot.time}-${slot.court}`}
-                              href={getBookingUrl(selectedVenue, selectedDate)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`${baseClasses} hover:opacity-90 cursor-pointer transition-opacity`}
-                            >
-                              {content}
-                            </a>
+                          if (hasAvailable) {
+                            statusClass = "bg-green-500 text-white";
+                            statusText = "Available";
+                            statusCount = venueData.available;
+                          } else if (isBooked) {
+                            statusClass = "bg-red-400 text-white";
+                            statusText = "Booked";
+                            statusCount = venueData.booked;
+                          } else if (isClosed) {
+                            statusClass = "bg-gray-300 text-gray-600";
+                            statusText = "Closed";
+                            statusCount = venueData.closed;
+                          }
+
+                          const cellContent = (
+                            <div className={`px-3 py-2 rounded text-center text-sm font-medium ${statusClass}`}>
+                              <div>{statusText}</div>
+                              {total > 0 && (
+                                <div className="text-xs opacity-90 mt-1">
+                                  {statusCount} slot{statusCount !== 1 ? "s" : ""}
+                                </div>
+                              )}
+                            </div>
                           );
-                        }
 
-                        return (
-                          <div key={`${slot.time}-${slot.court}`} className={baseClasses}>
-                            {content}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+                          return (
+                            <td key={venue.slug} className="px-4 py-3">
+                              {hasAvailable ? (
+                                <a
+                                  href={getBookingUrl(venue.slug, selectedDate)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block hover:opacity-90 transition-opacity cursor-pointer"
+                                >
+                                  {cellContent}
+                                </a>
+                              ) : (
+                                cellContent
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -730,19 +927,30 @@ function DashboardContent() {
           </div>
 
           {/* Link to booking site */}
-          <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-              Ready to book?
-            </p>
-            <a
-              href={getBookingUrl(selectedVenue, selectedDate)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
-            >
-              Book Now
-            </a>
-          </div>
+          {selectedVenues.length > 0 && (
+            <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                Ready to book?
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {selectedVenues.map((venueSlug) => {
+                  const venue = VENUES.find((v) => v.slug === venueSlug);
+                  if (!venue) return null;
+                  return (
+                    <a
+                      key={venueSlug}
+                      href={getBookingUrl(venueSlug, selectedDate)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
+                    >
+                      Book {venue.name}
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </>
       )}
 
