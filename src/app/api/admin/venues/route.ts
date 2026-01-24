@@ -41,10 +41,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { name, slug, type, clubsparkHost, clubsparkId } = await request.json();
+    const { name, slug } = await request.json();
 
-    if (!name || !slug || !type) {
-      return NextResponse.json({ error: "Name, slug, and type are required" }, { status: 400 });
+    if (!name || !slug) {
+      return NextResponse.json({ error: "Name and slug are required" }, { status: 400 });
     }
 
     // Check if venue with slug already exists
@@ -53,13 +53,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Venue with this slug already exists" }, { status: 400 });
     }
 
-    // Create new venue
+    // Create new venue (type/platform config is defined in constants.ts)
     const [newVenue] = await db.insert(venues).values({
       name,
       slug,
-      type,
-      clubsparkHost: clubsparkHost || null,
-      clubsparkId: clubsparkId || null,
     }).returning();
 
     return NextResponse.json({ venue: newVenue }, { status: 201 });
