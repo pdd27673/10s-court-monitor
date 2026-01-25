@@ -79,7 +79,7 @@ export async function scrapeClubSpark(
         (s) => s.StartTime <= timeMinutes && s.EndTime > timeMinutes
       );
 
-      let status: "available" | "booked" | "closed";
+      let status: "available" | "booked" | "closed" | "coaching";
       let price: string | undefined;
 
       if (session) {
@@ -92,8 +92,8 @@ export async function scrapeClubSpark(
           // User booking - slot is taken
           status = "booked";
         } else {
-          // Coaching/class/other - not available for booking
-          status = "closed";
+          // Coaching/class/other - venue is operational but not available for public booking
+          status = "coaching";
         }
       } else {
         // No session = available for booking

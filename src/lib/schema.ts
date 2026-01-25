@@ -28,7 +28,7 @@ export const slots = sqliteTable("slots", {
   date: text("date").notNull(),
   time: text("time").notNull(),
   court: text("court").notNull(),
-  status: text("status").notNull(), // 'available', 'booked', 'closed'
+  status: text("status").notNull(), // 'available', 'booked', 'closed', 'coaching'
   price: text("price"),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

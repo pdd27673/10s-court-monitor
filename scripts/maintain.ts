@@ -810,7 +810,7 @@ async function runScrape() {
     let totalAvailable = 0;
 
     for (const venue of VENUES) {
-      for (const d of getNextNDays(7)) {
+      for (const d of getNextNDays(8)) {
         try {
           const scrapedSlots = await scrapeVenue(venue, d);
           totalSlots += scrapedSlots.length;

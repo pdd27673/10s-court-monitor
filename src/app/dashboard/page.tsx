@@ -5,39 +5,14 @@ import { useSession, signOut } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { VENUES, type Venue } from "@/lib/constants";
-
-// Helper function to get booking URL for a venue
-function getBookingUrl(venueSlug: string, date?: string): string {
-  const venue = VENUES.find((v) => v.slug === venueSlug);
-  if (!venue) return "#";
-
-  if (venue.type === "clubspark" && venue.clubsparkHost && venue.clubsparkId) {
-    // ClubSpark booking URLs with date parameter
-    // For main LTA site (clubspark.lta.org.uk), include venue ID in path
-    const isMainLtaSite = venue.clubsparkHost === "clubspark.lta.org.uk";
-    const basePath = isMainLtaSite 
-      ? `https://${venue.clubsparkHost}/${venue.clubsparkId}/Booking/BookByDate`
-      : `https://${venue.clubsparkHost}/Booking/BookByDate`;
-    
-    if (date) {
-      return `${basePath}#?date=${date}`;
-    }
-    return basePath;
-  }
-  
-  // Courtside venues
-  if (date) {
-    return `https://tennistowerhamlets.com/book/courts/${venueSlug}/${date}`;
-  }
-  return `https://tennistowerhamlets.com/book/courts/${venueSlug}`;
-}
+import { getBookingUrl } from "@/lib/utils/link-helpers";
 
 interface Slot {
   venueSlug?: string;
   venueName?: string;
   time: string;
   court: string;
-  status: "available" | "booked" | "closed";
+  status: "available" | "booked" | "closed" | "coaching";
   price: string | null;
 }
 
@@ -564,8 +539,8 @@ function DashboardContent() {
     }
   };
 
-  // Group slots by time and venue, aggregating counts
-  const slotsByTimeAndVenue: Record<string, Record<string, { available: number; booked: number; closed: number }>> = {};
+  // Group slots by time and venue, aggregating counts and prices
+  const slotsByTimeAndVenue: Record<string, Record<string, { available: number; booked: number; closed: number; coaching: number; prices: number[] }>> = {};
   const allTimes = new Set<string>();
   
   if (availability?.slots) {
@@ -578,15 +553,24 @@ function DashboardContent() {
         slotsByTimeAndVenue[time] = {};
       }
       if (!slotsByTimeAndVenue[time][venueSlug]) {
-        slotsByTimeAndVenue[time][venueSlug] = { available: 0, booked: 0, closed: 0 };
+        slotsByTimeAndVenue[time][venueSlug] = { available: 0, booked: 0, closed: 0, coaching: 0, prices: [] };
       }
       
       if (slot.status === "available") {
         slotsByTimeAndVenue[time][venueSlug].available++;
+        // Extract numeric price from string like "£10.00"
+        if (slot.price) {
+          const priceMatch = slot.price.match(/[\d.]+/);
+          if (priceMatch) {
+            slotsByTimeAndVenue[time][venueSlug].prices.push(parseFloat(priceMatch[0]));
+          }
+        }
       } else if (slot.status === "booked") {
         slotsByTimeAndVenue[time][venueSlug].booked++;
       } else if (slot.status === "closed") {
         slotsByTimeAndVenue[time][venueSlug].closed++;
+      } else if (slot.status === "coaching") {
+        slotsByTimeAndVenue[time][venueSlug].coaching++;
       }
     }
   }
@@ -972,38 +956,53 @@ function DashboardContent() {
                             available: 0,
                             booked: 0,
                             closed: 0,
+                            coaching: 0,
+                            prices: [],
                           };
-                          const total = venueData.available + venueData.booked + venueData.closed;
+                          const total = venueData.available + venueData.booked + venueData.closed + venueData.coaching;
                           const hasAvailable = venueData.available > 0;
-                          const isBooked = venueData.booked > 0 && venueData.available === 0;
-                          const isClosed = total > 0 && venueData.available === 0 && venueData.booked === 0;
+                          const isCoaching = venueData.coaching > 0 && venueData.available === 0;
+                          const isBooked = venueData.booked > 0 && venueData.available === 0 && venueData.coaching === 0;
+                          const isClosed = total > 0 && venueData.available === 0 && venueData.booked === 0 && venueData.coaching === 0;
 
                           let statusClass = "bg-gray-100 dark:bg-gray-800 text-gray-600";
                           let statusText = "No data";
+                          let showCount = false;
                           let statusCount = 0;
+                          let minPrice: number | null = null;
 
                           if (hasAvailable) {
                             statusClass = "bg-green-500 text-white";
                             statusText = "Available";
                             statusCount = venueData.available;
+                            showCount = true;
+                            if (venueData.prices.length > 0) {
+                              minPrice = Math.min(...venueData.prices);
+                            }
+                          } else if (isCoaching) {
+                            statusClass = "bg-blue-400 text-white";
+                            statusText = "Coaching";
                           } else if (isBooked) {
                             statusClass = "bg-red-400 text-white";
                             statusText = "Booked";
-                            statusCount = venueData.booked;
                           } else if (isClosed) {
                             statusClass = "bg-gray-300 text-gray-600";
                             statusText = "Closed";
-                            statusCount = venueData.closed;
                           }
 
                           const cellContent = (
-                            <div className={`px-3 py-2 rounded text-center text-sm font-medium ${statusClass}`}>
+                            <div className={`px-3 py-2 rounded text-center text-sm font-medium min-h-[60px] flex flex-col justify-center ${statusClass}`}>
                               <div>{statusText}</div>
-                              {total > 0 && (
-                                <div className="text-xs opacity-90 mt-1">
-                                  {statusCount} slot{statusCount !== 1 ? "s" : ""}
-                                </div>
-                              )}
+                              <div className="text-xs opacity-90 mt-1 h-8 flex flex-col items-center justify-center">
+                                {showCount && total > 0 && (
+                                  <>
+                                    <div>{statusCount} court{statusCount !== 1 ? "s" : ""}</div>
+                                    {minPrice !== null && (
+                                      <div className="text-[10px] opacity-75">from £{minPrice.toFixed(2)}</div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                             </div>
                           );
 
@@ -1037,6 +1036,10 @@ function DashboardContent() {
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded bg-green-500"></div>
               <span>Available</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-blue-400"></div>
+              <span>Coaching</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded bg-red-400"></div>

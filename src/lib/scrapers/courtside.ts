@@ -41,7 +41,7 @@ export async function scrapeCourtside(
         const court = buttonText || "Unknown";
 
         // Determine status from button class
-        let status: "available" | "booked" | "closed";
+        let status: "available" | "booked" | "closed" | "coaching";
         let price: string | undefined;
 
         if (button.hasClass("available")) {
@@ -49,6 +49,9 @@ export async function scrapeCourtside(
           price = priceSpan.text().trim();
         } else if (button.hasClass("booked")) {
           status = "booked";
+        } else if (button.hasClass("coaching") || button.hasClass("class")) {
+          // Coaching or class sessions
+          status = "coaching";
         } else {
           // maintenance or other = closed
           status = "closed";
