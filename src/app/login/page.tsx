@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { signIn } from "next-auth/react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -37,6 +40,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
+        <button
+          onClick={() => router.push("/")}
+          className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors flex items-center gap-2"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+          Back to Home
+        </button>
         <div>
           <h1 className="text-3xl font-bold text-center ">
             🎾 Time for Tennis
@@ -51,8 +63,16 @@ export default function LoginPage() {
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-              {error}
+            <div className="space-y-3">
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                {error}
+              </div>
+              <Link
+                href="/register"
+                className="block w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-center"
+              >
+                Request Access
+              </Link>
             </div>
           )}
 
@@ -85,7 +105,10 @@ export default function LoginPage() {
         <p className="text-center text-xs text-gray-500">
           Only pre-approved email addresses can sign in.
           <br />
-          Contact the admin if you need access.
+          <Link href="/register" className="text-blue-600 hover:underline font-medium">
+            Request access
+          </Link>{" "}
+          if you need an account.
         </p>
       </div>
     </div>

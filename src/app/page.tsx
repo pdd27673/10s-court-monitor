@@ -22,6 +22,12 @@ export default function Home() {
         >
           View as Guest
         </Link>
+        <Link
+          href="/register"
+          className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors text-center"
+        >
+          Request Access
+        </Link>
       </div>
 
       <div className="mt-16 text-center text-sm text-gray-500 dark:text-gray-400">

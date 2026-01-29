@@ -3,6 +3,6 @@ export interface ScrapedSlot {
   date: string;
   time: string;
   court: string;
-  status: "available" | "booked" | "closed";
+  status: "available" | "booked" | "closed" | "coaching";
   price?: string;
 }

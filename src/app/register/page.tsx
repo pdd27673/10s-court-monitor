@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [formData, setFormData] = useState({
     email: "",
     name: "",
@@ -49,7 +51,16 @@ export default function RegisterPage() {
   if (submitted) {
     return (
       <main className="min-h-screen flex items-center justify-center p-8">
-        <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
+        <div className="max-w-md w-full bg-black rounded-lg shadow-lg p-8">
+          <button
+            onClick={() => router.push("/")}
+            className="mb-4 text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Back to Home
+          </button>
           <div className="text-center">
             <div className="mb-4">
               <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto">
@@ -68,8 +79,8 @@ export default function RegisterPage() {
                 </svg>
               </div>
             </div>
-            <h1 className="text-2xl font-bold mb-4">Request Submitted!</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">
+            <h1 className="text-2xl font-bold mb-4 text-white">Request Submitted!</h1>
+            <p className="text-gray-300 mb-6">
               Your registration request has been submitted for approval. We&apos;ll review your
               request and send you an email once it&apos;s been processed.
             </p>
@@ -95,10 +106,19 @@ export default function RegisterPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center p-8">
-      <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
+      <div className="max-w-md w-full bg-black rounded-lg shadow-lg p-8">
+        <button
+          onClick={() => router.push("/")}
+          className="mb-4 text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+          Back to Home
+        </button>
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold mb-2">Request Access</h1>
-          <p className="text-gray-600 dark:text-gray-400">
+          <h1 className="text-2xl font-bold mb-2 text-white">Request Access</h1>
+          <p className="text-gray-300">
             Sign up for Time for Tennis court notifications
           </p>
         </div>
@@ -107,8 +127,8 @@ export default function RegisterPage() {
           <div
             className={`mb-6 p-4 rounded-lg ${
               message.type === "success"
-                ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200"
-                : "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200"
+                ? "bg-green-900/30 border border-green-700 text-green-200"
+                : "bg-red-900/30 border border-red-700 text-red-200"
             }`}
           >
             <p className="text-sm">{message.text}</p>
@@ -117,7 +137,7 @@ export default function RegisterPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-2">
+            <label htmlFor="email" className="block text-sm font-medium mb-2 text-white">
               Email Address *
             </label>
             <input
@@ -126,13 +146,13 @@ export default function RegisterPage() {
               required
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full p-3 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white placeholder-gray-400"
               placeholder="your@email.com"
             />
           </div>
 
           <div>
-            <label htmlFor="name" className="block text-sm font-medium mb-2">
+            <label htmlFor="name" className="block text-sm font-medium mb-2 text-white">
               Name (optional)
             </label>
             <input
@@ -140,13 +160,13 @@ export default function RegisterPage() {
               id="name"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full p-3 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white placeholder-gray-400"
               placeholder="Your name"
             />
           </div>
 
           <div>
-            <label htmlFor="reason" className="block text-sm font-medium mb-2">
+            <label htmlFor="reason" className="block text-sm font-medium mb-2 text-white">
               Why do you want access? *
             </label>
             <textarea
@@ -154,11 +174,11 @@ export default function RegisterPage() {
               required
               value={formData.reason}
               onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 min-h-[100px]"
+              className="w-full p-3 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white placeholder-gray-400 min-h-[100px]"
               placeholder="Tell us why you'd like to use Time for Tennis (minimum 10 characters)"
               minLength={10}
             />
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs text-gray-400 mt-1">
               {formData.reason.length}/10 characters minimum
             </p>
           </div>
@@ -172,9 +192,9 @@ export default function RegisterPage() {
           </button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-          Already have an account?{" "}
-          <Link href="/login" className="text-green-600 hover:underline font-medium">
+        <div className="mt-6 text-center text-sm text-gray-300">
+          Already approved?{" "}
+          <Link href="/login" className="text-green-400 hover:underline font-medium">
             Sign in
           </Link>
         </div>

@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { SlotChange } from "../differ";
+import { getBookingUrl } from "../utils/link-helpers";
 
 // Resend client for HTTP-based email
 const resend = process.env.RESEND_API_KEY
@@ -55,54 +56,81 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
   const subject = `${changes.length} tennis court${changes.length > 1 ? "s" : ""} now available`;
 
   // Group by venue and date
-  const grouped: Record<string, SlotChange[]> = {};
+  const grouped: Record<string, { venueName: string; venueSlug: string; date: string; slots: SlotChange[] }> = {};
   for (const change of changes) {
-    const key = `${change.venueName}|${change.date}`;
-    if (!grouped[key]) grouped[key] = [];
-    grouped[key].push(change);
+    const key = `${change.venue}|${change.date}`;
+    if (!grouped[key]) {
+      grouped[key] = {
+        venueName: change.venueName,
+        venueSlug: change.venue,
+        date: change.date,
+        slots: [],
+      };
+    }
+    grouped[key].slots.push(change);
   }
 
   let html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h1 style="color: #16a34a;">Tennis Courts Available!</h1>
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #16a34a; font-size: 28px; margin: 0 0 8px 0;">🎾 Tennis Courts Available!</h1>
+        <p style="color: #6b7280; font-size: 16px; margin: 0;">${changes.length} slot${changes.length > 1 ? "s" : ""} just became available</p>
+      </div>
   `;
 
-  for (const [key, slots] of Object.entries(grouped)) {
-    const [venueName, date] = key.split("|");
-    const formattedDate = new Date(date).toLocaleDateString("en-GB", {
+  for (const group of Object.values(grouped)) {
+    const formattedDate = new Date(group.date).toLocaleDateString("en-GB", {
       weekday: "long",
       day: "numeric",
       month: "long",
     });
+    const bookingUrl = getBookingUrl(group.venueSlug, group.date);
+    
+    // Sort slots by time
+    const sortedSlots = [...group.slots].sort((a, b) => {
+      const timeA = a.time.toLowerCase();
+      const timeB = b.time.toLowerCase();
+      return timeA.localeCompare(timeB);
+    });
 
     html += `
-      <div style="margin-bottom: 20px; padding: 16px; background: #f9fafb; border-radius: 8px;">
-        <h2 style="margin: 0 0 8px 0; color: #111827;">${venueName}</h2>
-        <p style="margin: 0 0 12px 0; color: #6b7280;">${formattedDate}</p>
-        <ul style="margin: 0; padding-left: 20px;">
+      <div style="margin-bottom: 24px; padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+        <div style="margin-bottom: 16px;">
+          <h2 style="margin: 0 0 6px 0; color: #111827; font-size: 20px; font-weight: 600;">${group.venueName}</h2>
+          <p style="margin: 0; color: #6b7280; font-size: 14px;">${formattedDate}</p>
+        </div>
+        
+        <div style="background: #f9fafb; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+          <p style="margin: 0 0 8px 0; color: #374151; font-size: 14px; font-weight: 500;">Available slots:</p>
+          <ul style="margin: 0; padding-left: 20px; list-style: none;">
     `;
 
-    for (const slot of slots) {
-      const priceStr = slot.price ? ` - ${slot.price}` : "";
-      html += `<li style="margin: 4px 0; color: #374151;">${slot.time} - ${slot.court}${priceStr}</li>`;
+    for (const slot of sortedSlots) {
+      const priceStr = slot.price ? ` <span style="color: #059669; font-weight: 500;">${slot.price}</span>` : "";
+      html += `<li style="margin: 6px 0; color: #374151; font-size: 14px;">• ${slot.time} - <strong>${slot.court}</strong>${priceStr}</li>`;
     }
 
     html += `
-        </ul>
+          </ul>
+        </div>
+        
+        <a href="${bookingUrl}" 
+           style="display: inline-block; width: 100%; text-align: center; padding: 14px 24px; background: #16a34a; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; transition: background-color 0.2s;">
+          Book ${group.venueName} →
+        </a>
       </div>
     `;
   }
 
   html += `
-      <p style="margin-top: 24px;">
-        <a href="https://tennistowerhamlets.com/courts" style="color: #10b981;"
-           style="display: inline-block; padding: 12px 24px; background: #16a34a; color: white; text-decoration: none; border-radius: 6px; font-weight: 500;">
-          Book Now
-        </a>
-      </p>
-      <p style="margin-top: 24px; color: #9ca3af; font-size: 14px;">
-        You're receiving this because you set up a tennis court alert.
-      </p>
+      <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb; text-align: center;">
+        <p style="margin: 0 0 8px 0; color: #9ca3af; font-size: 13px;">
+          You're receiving this because you set up a tennis court alert.
+        </p>
+        <p style="margin: 0; color: #9ca3af; font-size: 12px;">
+          Manage your alerts in your <a href="${process.env.NEXTAUTH_URL || "https://your-app.com"}/dashboard?tab=settings" style="color: #16a34a; text-decoration: underline;">dashboard</a>
+        </p>
+      </div>
     </div>
   `;
 

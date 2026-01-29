@@ -47,7 +47,7 @@ async function runScrapeJob() {
     await ensureVenuesExist();
 
     // Get next 7 days
-    const dates = getNextNDays(7);
+    const dates = getNextNDays(8);
     const allSlots: ScrapedSlot[] = [];
 
     // Scrape all venues for all dates

@@ -28,7 +28,7 @@ export async function POST() {
     (async () => {
       try {
         await ensureVenuesExist();
-        const dates = getNextNDays(7);
+        const dates = getNextNDays(8);
         const allSlots: ScrapedSlot[] = [];
 
         for (const venue of VENUES) {
