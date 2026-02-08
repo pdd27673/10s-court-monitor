@@ -17,7 +17,7 @@ export async function PUT(
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -38,11 +38,14 @@ export async function PUT(
     }
 
     if (action === "approve") {
+      // Normalize email to lowercase for case-insensitive comparison
+      const normalizedEmail = regRequest.email.toLowerCase();
+
       // Check if user already exists (might have tried to log in before approval)
       const existingUser = await db
         .select()
         .from(users)
-        .where(eq(users.email, regRequest.email))
+        .where(eq(users.email, normalizedEmail))
         .limit(1);
 
       let user;
@@ -54,7 +57,7 @@ export async function PUT(
             isAllowed: 1,
             name: regRequest.name || existingUser[0].name,
           })
-          .where(eq(users.email, regRequest.email))
+          .where(eq(users.email, normalizedEmail))
           .returning();
         user = updatedUser;
       } else {
@@ -62,7 +65,7 @@ export async function PUT(
         const [newUser] = await db
           .insert(users)
           .values({
-            email: regRequest.email,
+            email: normalizedEmail,
             name: regRequest.name,
             isAllowed: 1,
           })
@@ -83,7 +86,7 @@ export async function PUT(
       // Send welcome email
       try {
         await sendEmail(
-          regRequest.email,
+          normalizedEmail,
           "Welcome to Time for Tennis!",
           `
             <h2>Your access has been approved!</h2>
@@ -122,7 +125,7 @@ export async function PUT(
       // Send rejection email
       try {
         await sendEmail(
-          regRequest.email,
+          regRequest.email.toLowerCase(),
           "Time for Tennis - Registration Update",
           `
             <h2>Thank you for your interest</h2>
@@ -157,7 +160,7 @@ export async function DELETE(
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -12,6 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
+    "db:normalize-emails": "tsx scripts/normalize-emails.ts",
+    "db:migrate-watches": "tsx scripts/migrate-watches-to-days.ts",
     "maintain": "tsx scripts/maintain.ts",
     "soak-test": "tsx scripts/soak-test.ts"
   },

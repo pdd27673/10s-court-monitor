@@ -10,8 +10,9 @@ function matchesWatch(
   change: SlotChange,
   watch: {
     venueId: number | null;
-    weekdayTimes: string | null;
-    weekendTimes: string | null;
+    dayTimes: string | null;
+    weekdayTimes: string | null; // Legacy field
+    weekendTimes: string | null; // Legacy field
   },
   venueIdMap: Record<string, number>
 ): boolean {
@@ -23,24 +24,45 @@ function matchesWatch(
 
   // Check day of week and time preferences
   const date = new Date(change.date);
-  const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
-  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  
+  // Map day of week to day name
+  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const dayName = dayNames[dayOfWeek];
 
-  // Get the appropriate time list based on day type
-  const timesJson = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
+  let preferredTimes: string[] = [];
 
-  // If no times configured for this day type, skip
-  if (!timesJson) return false;
-
-  try {
-    const preferredTimes: string[] = JSON.parse(timesJson);
-    // Direct match on am/pm times (e.g., "5pm", "6pm")
-    const changeTime = change.time.toLowerCase().trim();
-    if (!preferredTimes.some((t) => t.toLowerCase().trim() === changeTime)) {
+  // Try new dayTimes format first
+  if (watch.dayTimes) {
+    try {
+      const dayTimes = JSON.parse(watch.dayTimes);
+      preferredTimes = dayTimes[dayName] || [];
+    } catch {
+      // If JSON parse fails, skip this watch
       return false;
     }
-  } catch {
-    // If JSON parse fails, skip this watch
+  } else {
+    // Fall back to legacy weekday/weekend format
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const timesJson = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
+    
+    // If no times configured for this day type, skip
+    if (!timesJson) return false;
+    
+    try {
+      preferredTimes = JSON.parse(timesJson);
+    } catch {
+      // If JSON parse fails, skip this watch
+      return false;
+    }
+  }
+
+  // If no times configured for this specific day, skip
+  if (preferredTimes.length === 0) return false;
+
+  // Direct match on am/pm times (e.g., "5pm", "6pm")
+  const changeTime = change.time.toLowerCase().trim();
+  if (!preferredTimes.some((t) => t.toLowerCase().trim() === changeTime)) {
     return false;
   }
 
