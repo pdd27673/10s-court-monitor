@@ -20,31 +20,33 @@ export default function AdminSidebar({ pendingRequestsCount }: AdminSidebarProps
   ];
 
   return (
-    <aside className="fixed left-0 top-0 h-full w-64 bg-gray-900 text-white flex flex-col">
+    <aside className="fixed left-0 top-0 h-full w-64 bg-gray-900 text-white flex flex-col shadow-xl">
       <div className="p-6 border-b border-gray-800">
-        <h1 className="text-xl font-bold">Admin Panel</h1>
+        <h1 className="text-xl font-bold text-white">Admin Panel</h1>
         <p className="text-sm text-gray-400 mt-1">Time for Tennis</p>
       </div>
 
-      <nav className="flex-1 p-4 space-y-2">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center justify-between px-4 py-3 rounded-lg transition-colors ${
+              className={`group flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-200 ${
                 isActive && !item.isExternal
-                  ? "bg-green-600 text-white"
-                  : "hover:bg-gray-800 text-gray-300"
+                  ? "bg-green-600 text-white shadow-lg shadow-green-600/20"
+                  : "hover:bg-gray-800 text-gray-300 hover:text-white"
               }`}
             >
               <span className="flex items-center gap-3">
-                <span>{item.icon}</span>
-                <span>{item.label}</span>
+                <span className="text-lg transition-transform group-hover:scale-110">{item.icon}</span>
+                <span className="font-medium">{item.label}</span>
               </span>
               {item.badge !== undefined && item.badge > 0 && (
-                <span className="px-2 py-0.5 bg-red-500 text-white text-xs rounded-full">
+                <span className={`px-2 py-0.5 text-white text-xs font-semibold rounded-full ${
+                  isActive && !item.isExternal ? "bg-red-500" : "bg-red-600"
+                } animate-pulse`}>
                   {item.badge}
                 </span>
               )}
@@ -56,11 +58,11 @@ export default function AdminSidebar({ pendingRequestsCount }: AdminSidebarProps
       <div className="p-4 border-t border-gray-800">
         <button
           onClick={() => signOut({ callbackUrl: "/" })}
-          className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-left"
+          className="w-full px-4 py-3 bg-gray-800 hover:bg-gray-700 hover:bg-red-600/20 rounded-lg transition-all duration-200 text-left group"
         >
           <span className="flex items-center gap-3">
-            <span>🚪</span>
-            <span>Sign Out</span>
+            <span className="text-lg transition-transform group-hover:scale-110">🚪</span>
+            <span className="font-medium">Sign Out</span>
           </span>
         </button>
       </div>
