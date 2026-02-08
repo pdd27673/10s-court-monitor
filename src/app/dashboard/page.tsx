@@ -28,8 +28,18 @@ interface Watch {
   id: number;
   venueSlug: string | null;
   venueName: string | null;
-  weekdayTimes: string[];
-  weekendTimes: string[];
+  dayTimes: {
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  };
+  // Legacy fields for backward compatibility during migration
+  weekdayTimes?: string[];
+  weekendTimes?: string[];
   active: boolean;
 }
 
@@ -198,6 +208,11 @@ function DashboardContent() {
   const [showChannelForm, setShowChannelForm] = useState(false);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  
+  // Bulk selection state
+  const [selectedWatchIds, setSelectedWatchIds] = useState<Set<number>>(new Set());
+  const [bulkEditMode, setBulkEditMode] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
 
   // Available time slots
   const TIME_SLOTS = [
@@ -289,15 +304,29 @@ function DashboardContent() {
             (w: {
               id: number;
               venue?: { slug: string; name: string } | null;
-              weekdayTimes: string[] | null;
-              weekendTimes: string[] | null;
+              dayTimes: {
+                monday: string[];
+                tuesday: string[];
+                wednesday: string[];
+                thursday: string[];
+                friday: string[];
+                saturday: string[];
+                sunday: string[];
+              } | null;
               active: number | boolean;
             }) => ({
               id: w.id,
               venueSlug: w.venue?.slug || null,
               venueName: w.venue?.name || null,
-              weekdayTimes: w.weekdayTimes || [],
-              weekendTimes: w.weekendTimes || [],
+              dayTimes: w.dayTimes || {
+                monday: [],
+                tuesday: [],
+                wednesday: [],
+                thursday: [],
+                friday: [],
+                saturday: [],
+                sunday: [],
+              },
               active: Boolean(w.active),
             })
           )
@@ -361,40 +390,66 @@ function DashboardContent() {
 
   // Watch management functions
   const handleCreateWatch = async (watchData: {
-    venueSlug: string | null;
-    weekdayTimes: string[];
-    weekendTimes: string[];
+    venueSlugs: string[];
+    dayTimes: {
+      monday: string[];
+      tuesday: string[];
+      wednesday: string[];
+      thursday: string[];
+      friday: string[];
+      saturday: string[];
+      sunday: string[];
+    };
   }) => {
     try {
-      const res = await fetch("/api/watches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(watchData),
-      });
+      // Create one watch per selected venue
+      const results = await Promise.all(
+        watchData.venueSlugs.map(venueSlug =>
+          fetch("/api/watches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              venueSlug,
+              dayTimes: watchData.dayTimes,
+            }),
+          })
+        )
+      );
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Failed to create watch");
+      // Check if all requests succeeded
+      const errors = results.filter(res => !res.ok);
+      if (errors.length > 0) {
+        throw new Error(`Failed to create ${errors.length} watch(es)`);
       }
 
       await fetchWatches();
       setShowWatchForm(false);
-      showMessage("success", "Watch created successfully!");
+      const count = watchData.venueSlugs.length;
+      showMessage("success", `${count} watch${count > 1 ? 'es' : ''} created successfully!`);
     } catch (error: any) {
       showMessage("error", error.message || "Failed to create watch");
     }
   };
 
   const handleUpdateWatch = async (watchId: number, watchData: {
-    venueSlug: string | null;
-    weekdayTimes: string[];
-    weekendTimes: string[];
+    venueSlugs: string[];
+    dayTimes: {
+      monday: string[];
+      tuesday: string[];
+      wednesday: string[];
+      thursday: string[];
+      friday: string[];
+      saturday: string[];
+      sunday: string[];
+    };
   }) => {
     try {
       const res = await fetch(`/api/watches/${watchId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(watchData),
+        body: JSON.stringify({
+          dayTimes: watchData.dayTimes,
+        }),
       });
 
       if (!res.ok) {
@@ -448,6 +503,98 @@ function DashboardContent() {
     } catch (error: any) {
       showMessage("error", error.message || "Failed to toggle watch");
     }
+  };
+
+  // Bulk operations
+  const handleBulkDelete = async () => {
+    if (selectedWatchIds.size === 0) return;
+    const count = selectedWatchIds.size;
+    if (!confirm(`Are you sure you want to delete ${count} watch${count > 1 ? 'es' : ''}?`)) return;
+
+    try {
+      await Promise.all(
+        Array.from(selectedWatchIds).map(id =>
+          fetch(`/api/watches/${id}`, { method: "DELETE" })
+        )
+      );
+      await fetchWatches();
+      setSelectedWatchIds(new Set());
+      setSelectionMode(false);
+      showMessage("success", `Deleted ${count} watch${count > 1 ? 'es' : ''} successfully!`);
+    } catch (error: any) {
+      showMessage("error", error.message || "Failed to delete watches");
+    }
+  };
+
+  const handleBulkToggle = async (activate: boolean) => {
+    if (selectedWatchIds.size === 0) return;
+    const count = selectedWatchIds.size;
+
+    try {
+      await Promise.all(
+        Array.from(selectedWatchIds).map(id =>
+          fetch(`/api/watches/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ active: activate }),
+          })
+        )
+      );
+      await fetchWatches();
+      setSelectedWatchIds(new Set());
+      showMessage("success", `${activate ? 'Activated' : 'Paused'} ${count} watch${count > 1 ? 'es' : ''} successfully!`);
+    } catch (error: any) {
+      showMessage("error", error.message || `Failed to ${activate ? 'activate' : 'pause'} watches`);
+    }
+  };
+
+  const handleBulkEdit = async (dayTimes: {
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }) => {
+    const count = selectedWatchIds.size;
+    try {
+      await Promise.all(
+        Array.from(selectedWatchIds).map(id =>
+          fetch(`/api/watches/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dayTimes }),
+          })
+        )
+      );
+      await fetchWatches();
+      setSelectedWatchIds(new Set());
+      setBulkEditMode(false);
+      showMessage("success", `Updated ${count} watch${count > 1 ? 'es' : ''} successfully!`);
+    } catch (error: any) {
+      showMessage("error", error.message || "Failed to update watches");
+    }
+  };
+
+  const toggleWatchSelection = (watchId: number) => {
+    setSelectedWatchIds(prev => {
+      const next = new Set(prev);
+      if (next.has(watchId)) {
+        next.delete(watchId);
+      } else {
+        next.add(watchId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllWatches = () => {
+    setSelectedWatchIds(new Set(watches.map(w => w.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedWatchIds(new Set());
   };
 
   // Channel management functions
@@ -1113,15 +1260,39 @@ function DashboardContent() {
                   about when they become available.
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingWatch(null);
-                  setShowWatchForm(true);
-                }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
-              >
-                + Create Watch
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setSelectionMode(!selectionMode);
+                    if (selectionMode) {
+                      setSelectedWatchIds(new Set());
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-sm ${
+                    selectionMode
+                      ? "bg-blue-600 text-white hover:bg-blue-700"
+                      : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  }`}
+                  title="Bulk delete watches"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  {selectionMode && "Cancel"}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingWatch(null);
+                    setShowWatchForm(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add
+                </button>
+              </div>
             </div>
 
             {loadingWatches ? (
@@ -1140,80 +1311,350 @@ function DashboardContent() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {watches.map((watch) => (
-                  <div
-                    key={watch.id}
-                    className={`p-4 border rounded-lg dark:border-gray-700 ${
-                      watch.active
-                        ? "bg-white dark:bg-gray-800"
-                        : "bg-gray-50 dark:bg-gray-900 opacity-60"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-medium">
-                          {watch.venueName ?? "All Venues"}
-                        </h3>
-                        <span
-                          className={`inline-block mt-1 text-xs px-2 py-0.5 rounded ${
-                            watch.active
-                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                          }`}
-                        >
-                          {watch.active ? "Active" : "Paused"}
+              <div className="space-y-6">
+                {/* Bulk Actions Bar */}
+                {selectionMode && selectedWatchIds.size > 0 && (
+                  <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-2 border-blue-500 dark:border-blue-600 rounded-lg p-4 shadow-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          {selectedWatchIds.size} watch{selectedWatchIds.size > 1 ? 'es' : ''} selected
                         </span>
+                        <button
+                          onClick={clearSelection}
+                          className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                        >
+                          Clear selection
+                        </button>
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => handleToggleWatch(watch.id, watch.active)}
-                          className={`px-3 py-1 text-xs rounded ${
-                            watch.active
-                              ? "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
-                              : "bg-green-100 dark:bg-green-900 hover:bg-green-200 dark:hover:bg-green-800"
-                          }`}
+                          onClick={() => handleBulkToggle(true)}
+                          className="px-3 py-1.5 text-xs bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-900/50 text-green-700 dark:text-green-300 rounded-lg font-medium transition-colors"
                         >
-                          {watch.active ? "Pause" : "Activate"}
+                          Activate All
                         </button>
                         <button
-                          onClick={() => setEditingWatch(watch)}
-                          className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 rounded"
+                          onClick={() => handleBulkToggle(false)}
+                          className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg font-medium transition-colors"
                         >
-                          Edit
+                          Pause All
                         </button>
                         <button
-                          onClick={() => handleDeleteWatch(watch.id)}
-                          className="px-3 py-1 text-xs bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 rounded"
+                          onClick={() => setBulkEditMode(true)}
+                          className="px-3 py-1.5 text-xs bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg font-medium transition-colors"
                         >
-                          Delete
+                          Bulk Edit
                         </button>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-gray-500 dark:text-gray-400 mb-1">
-                          Weekday Times
-                        </p>
-                        <p>
-                          {watch.weekdayTimes.length > 0
-                            ? watch.weekdayTimes.join(", ")
-                            : "Not set"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 dark:text-gray-400 mb-1">
-                          Weekend Times
-                        </p>
-                        <p>
-                          {watch.weekendTimes.length > 0
-                            ? watch.weekendTimes.join(", ")
-                            : "Not set"}
-                        </p>
+                        <button
+                          onClick={handleBulkDelete}
+                          className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg font-medium transition-colors"
+                        >
+                          Delete ({selectedWatchIds.size})
+                        </button>
                       </div>
                     </div>
                   </div>
-                ))}
+                )}
+
+                {/* Select All Checkbox - Only show in selection mode */}
+                {watches.length > 0 && selectionMode && (
+                  <div className="flex items-center gap-2 pb-2">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={selectedWatchIds.size === watches.length && watches.length > 0}
+                        ref={(input) => {
+                          if (input) {
+                            input.indeterminate = selectedWatchIds.size > 0 && selectedWatchIds.size < watches.length;
+                          }
+                        }}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            selectAllWatches();
+                          } else {
+                            clearSelection();
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-5 h-5 border-2 rounded-md bg-white dark:bg-gray-800 transition-all duration-200 flex items-center justify-center group-hover:border-green-500 dark:group-hover:border-green-500 peer-focus:ring-2 peer-focus:ring-green-500 peer-focus:ring-offset-1 peer-checked:bg-green-600 peer-checked:border-green-600 peer-indeterminate:bg-green-600 peer-indeterminate:border-green-600 border-gray-300 dark:border-gray-600">
+                        {selectedWatchIds.size === watches.length && watches.length > 0 ? (
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : selectedWatchIds.size > 0 && selectedWatchIds.size < watches.length ? (
+                          <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M5 12h14" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
+                          </svg>
+                        ) : null}
+                      </div>
+                      <span className="text-sm text-gray-700 dark:text-gray-300 font-medium">
+                        Select all watches
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {(() => {
+                  // Color palette for watches
+                  const WATCH_COLORS = [
+                    { bg: 'bg-blue-500', bgLight: 'bg-blue-100', bgDark: 'dark:bg-blue-900/30', text: 'text-blue-700', textDark: 'dark:text-blue-300', border: 'border-blue-500', borderLight: 'border-blue-200', borderDark: 'dark:border-blue-800' },
+                    { bg: 'bg-purple-500', bgLight: 'bg-purple-100', bgDark: 'dark:bg-purple-900/30', text: 'text-purple-700', textDark: 'dark:text-purple-300', border: 'border-purple-500', borderLight: 'border-purple-200', borderDark: 'dark:border-purple-800' },
+                    { bg: 'bg-pink-500', bgLight: 'bg-pink-100', bgDark: 'dark:bg-pink-900/30', text: 'text-pink-700', textDark: 'dark:text-pink-300', border: 'border-pink-500', borderLight: 'border-pink-200', borderDark: 'dark:border-pink-800' },
+                    { bg: 'bg-indigo-500', bgLight: 'bg-indigo-100', bgDark: 'dark:bg-indigo-900/30', text: 'text-indigo-700', textDark: 'dark:text-indigo-300', border: 'border-indigo-500', borderLight: 'border-indigo-200', borderDark: 'dark:border-indigo-800' },
+                    { bg: 'bg-cyan-500', bgLight: 'bg-cyan-100', bgDark: 'dark:bg-cyan-900/30', text: 'text-cyan-700', textDark: 'dark:text-cyan-300', border: 'border-cyan-500', borderLight: 'border-cyan-200', borderDark: 'dark:border-cyan-800' },
+                    { bg: 'bg-emerald-500', bgLight: 'bg-emerald-100', bgDark: 'dark:bg-emerald-900/30', text: 'text-emerald-700', textDark: 'dark:text-emerald-300', border: 'border-emerald-500', borderLight: 'border-emerald-200', borderDark: 'dark:border-emerald-800' },
+                    { bg: 'bg-amber-500', bgLight: 'bg-amber-100', bgDark: 'dark:bg-amber-900/30', text: 'text-amber-700', textDark: 'dark:text-amber-300', border: 'border-amber-500', borderLight: 'border-amber-200', borderDark: 'dark:border-amber-800' },
+                    { bg: 'bg-orange-500', bgLight: 'bg-orange-100', bgDark: 'dark:bg-orange-900/30', text: 'text-orange-700', textDark: 'dark:text-orange-300', border: 'border-orange-500', borderLight: 'border-orange-200', borderDark: 'dark:border-orange-800' },
+                  ];
+
+                  // Assign colors to watches
+                  const watchesWithColors = watches.map((watch, index) => ({
+                    ...watch,
+                    color: WATCH_COLORS[index % WATCH_COLORS.length],
+                  })) as Array<Watch & { color: typeof WATCH_COLORS[0] }>;
+
+                  // Group watches by venue
+                  type WatchWithColor = Watch & { color: typeof WATCH_COLORS[0] };
+                  const groupedWatches = watchesWithColors.reduce((acc, watch) => {
+                    const venueKey = watch.venueName ?? "Other";
+                    if (!acc[venueKey]) {
+                      acc[venueKey] = [];
+                    }
+                    acc[venueKey].push(watch);
+                    return acc;
+                  }, {} as Record<string, WatchWithColor[]>);
+
+                  return Object.entries(groupedWatches).map(([venueName, venueWatches]) => {
+                    const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+                    const DAY_LABELS = {
+                      monday: 'Mon',
+                      tuesday: 'Tue',
+                      wednesday: 'Wed',
+                      thursday: 'Thu',
+                      friday: 'Fri',
+                      saturday: 'Sat',
+                      sunday: 'Sun',
+                    };
+
+                    // Get all unique time slots across all watches
+                    const allTimeSlots = new Set<string>();
+                    venueWatches.forEach(watch => {
+                      Object.values(watch.dayTimes).forEach(times => {
+                        times.forEach(time => allTimeSlots.add(time));
+                      });
+                    });
+                    const sortedTimeSlots = TIME_SLOTS.filter(t => allTimeSlots.has(t));
+
+                    return (
+                      <div key={venueName} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800">
+                        {/* Venue Header with Watch Legend */}
+                        <div className="bg-gray-50 dark:bg-gray-900/50 px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-3">
+                              <h3 className="font-semibold text-lg text-gray-900 dark:text-gray-100">{venueName}</h3>
+                              <span className="text-xs text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800 px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700">
+                                {venueWatches.length} watch{venueWatches.length > 1 ? 'es' : ''}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Watch Color Legend */}
+                          <div className="flex flex-wrap gap-3 mt-2">
+                            {venueWatches.map((watch) => (
+                              <div key={watch.id} className="flex items-center gap-1.5">
+                                <div className={`w-3 h-3 rounded-full ${watch.color.bg}`}></div>
+                                <span className="text-xs text-gray-600 dark:text-gray-400">
+                                  {watch.venueName || 'Watch'} {watch.active ? '' : '(Paused)'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                      {/* Calendar View */}
+                      <div className="p-4">
+                        {sortedTimeSlots.length === 0 ? (
+                          <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                            No times configured for any watch
+                          </p>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <div className="inline-block min-w-full">
+                              {/* Calendar Header */}
+                              <div className="grid grid-cols-8 gap-1 mb-2">
+                                <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 py-2">
+                                  Time
+                                </div>
+                                {DAYS.map((day) => (
+                                  <div key={day} className="text-xs font-semibold text-gray-700 dark:text-gray-300 text-center py-2">
+                                    {DAY_LABELS[day]}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Calendar Rows */}
+                              <div className="space-y-1">
+                                {sortedTimeSlots.map((time) => (
+                                  <div key={time} className="grid grid-cols-8 gap-1">
+                                    {/* Time Label */}
+                                    <div className="text-xs text-gray-600 dark:text-gray-400 py-1.5 flex items-center">
+                                      {time}
+                                    </div>
+                                    
+                                    {/* Day Columns */}
+                                    {DAYS.map((day) => {
+                                      // Find watches that have this time on this day
+                                      const watchesForThisSlot = venueWatches.filter((watch): watch is WatchWithColor => 
+                                        watch.dayTimes[day]?.includes(time) ?? false
+                                      );
+
+                                      return (
+                                        <div
+                                          key={day}
+                                          className="min-h-[32px] border border-gray-200 dark:border-gray-700 rounded p-1 flex flex-wrap gap-0.5 items-start"
+                                        >
+                                          {watchesForThisSlot.map((watch) => {
+                                            const isSelected = selectedWatchIds.has(watch.id);
+                                            return (
+                                              <div
+                                                key={watch.id}
+                                                className={`flex-1 min-w-[20px] h-6 rounded ${watch.color.bgLight} ${watch.color.bgDark} border ${watch.color.borderLight} ${watch.color.borderDark} flex items-center justify-center cursor-pointer transition-all ${
+                                                  isSelected ? 'ring-2 ring-blue-500' : ''
+                                                } ${!watch.active ? 'opacity-50' : ''}`}
+                                                title={`${watch.venueName || 'Watch'} - ${time} ${day}`}
+                                                onClick={() => {
+                                                  if (selectionMode) {
+                                                    toggleWatchSelection(watch.id);
+                                                  } else {
+                                                    const { color, ...watchWithoutColor } = watch;
+                                                    setEditingWatch(watchWithoutColor);
+                                                  }
+                                                }}
+                                              >
+                                                {selectionMode && (
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleWatchSelection(watch.id)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="sr-only peer"
+                                                  />
+                                                )}
+                                                <div className={`w-2 h-2 rounded-full ${watch.color.bg}`}></div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Watch Actions Row */}
+                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2">
+                          {venueWatches.map((watch) => {
+                            const isSelected = selectedWatchIds.has(watch.id);
+                            const activeDays = Object.entries(watch.dayTimes)
+                              .filter(([_, times]) => times.length > 0);
+                            const totalTimeSlots = Object.values(watch.dayTimes)
+                              .reduce((sum, times) => sum + times.length, 0);
+
+                            return (
+                              <div
+                                key={watch.id}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                                  isSelected
+                                    ? "bg-blue-50 dark:bg-blue-900/10 border-blue-500"
+                                    : "bg-gray-50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700"
+                                }`}
+                              >
+                                {/* Checkbox - Only show in selection mode */}
+                                {selectionMode && (
+                                  <label className="cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleWatchSelection(watch.id)}
+                                      className="sr-only peer"
+                                    />
+                                    <div className={`w-4 h-4 border-2 rounded-md bg-white dark:bg-gray-800 transition-all duration-200 flex items-center justify-center peer-focus:ring-2 peer-focus:ring-green-500 peer-focus:ring-offset-1 ${
+                                      isSelected
+                                        ? "bg-green-600 border-green-600 shadow-sm"
+                                        : "border-gray-300 dark:border-gray-600"
+                                    }`}>
+                                      {isSelected && (
+                                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                      )}
+                                    </div>
+                                  </label>
+                                )}
+                                
+                                {/* Color Indicator */}
+                                <div className={`w-3 h-3 rounded-full ${watch.color.bg}`}></div>
+                                
+                                {/* Watch Info */}
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    watch.active
+                                      ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+                                      : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-400"
+                                  }`}>
+                                    {watch.active ? "Active" : "Paused"}
+                                  </span>
+                                  {totalTimeSlots > 0 && (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                      {totalTimeSlots} slots
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex gap-1 ml-auto">
+                                  <button
+                                    onClick={() => handleToggleWatch(watch.id, watch.active)}
+                                    className={`px-2 py-1 text-xs rounded font-medium transition-colors ${
+                                      watch.active
+                                        ? "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
+                                        : "bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-900/50 text-green-700 dark:text-green-300"
+                                    }`}
+                                    title={watch.active ? "Pause watch" : "Activate watch"}
+                                  >
+                                    {watch.active ? "Pause" : "Activate"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const { color, ...watchWithoutColor } = watch;
+                                      setEditingWatch(watchWithoutColor);
+                                    }}
+                                    className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded font-medium transition-colors"
+                                    title="Edit watch"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteWatch(watch.id)}
+                                    className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded font-medium transition-colors"
+                                    title="Delete watch"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+                })()}
               </div>
             )}
           </section>
@@ -1439,6 +1880,20 @@ function DashboardContent() {
         />
       )}
 
+      {/* Bulk Edit Modal */}
+      {bulkEditMode && (
+        <BulkEditWatchModal
+          selectedCount={selectedWatchIds.size}
+          onClose={() => {
+            setBulkEditMode(false);
+          }}
+          onSubmit={(dayTimes) => {
+            handleBulkEdit(dayTimes);
+          }}
+          timeSlots={TIME_SLOTS}
+        />
+      )}
+
       {/* Channel Form Modal */}
       {(showChannelForm || editingChannel) && (
         <ChannelFormModal
@@ -1467,140 +1922,684 @@ function WatchFormModal({
   watch: Watch | null;
   onClose: () => void;
   onSubmit: (data: {
-    venueSlug: string | null;
-    weekdayTimes: string[];
-    weekendTimes: string[];
+    venueSlugs: string[];
+    dayTimes: {
+      monday: string[];
+      tuesday: string[];
+      wednesday: string[];
+      thursday: string[];
+      friday: string[];
+      saturday: string[];
+      sunday: string[];
+    };
   }) => void;
   timeSlots: string[];
 }) {
-  const [venueSlug, setVenueSlug] = useState<string | null>(
-    watch?.venueSlug || null
-  );
-  const [weekdayTimes, setWeekdayTimes] = useState<string[]>(
-    watch?.weekdayTimes || []
-  );
-  const [weekendTimes, setWeekendTimes] = useState<string[]>(
-    watch?.weekendTimes || []
-  );
-  const [submitting, setSubmitting] = useState(false);
+  const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+  const DAY_LABELS = {
+    monday: 'Monday',
+    tuesday: 'Tuesday',
+    wednesday: 'Wednesday',
+    thursday: 'Thursday',
+    friday: 'Friday',
+    saturday: 'Saturday',
+    sunday: 'Sunday',
+  };
+  const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
+  const WEEKENDS = ['saturday', 'sunday'] as const;
 
-  const toggleTime = (
-    time: string,
-    times: string[],
-    setTimes: (times: string[]) => void
-  ) => {
-    if (times.includes(time)) {
-      setTimes(times.filter((t) => t !== time));
-    } else {
-      setTimes([...times, time].sort());
+  // For editing, we only edit one watch at a time (single venue)
+  const [selectedVenues, setSelectedVenues] = useState<string[]>(
+    watch?.venueSlug ? [watch.venueSlug] : []
+  );
+  const [venueDropdownOpen, setVenueDropdownOpen] = useState(false);
+  const [venueSearch, setVenueSearch] = useState("");
+  const [dayViewTab, setDayViewTab] = useState<'all' | 'weekdays' | 'weekends'>('all');
+  
+  const [dayTimes, setDayTimes] = useState<{
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }>(
+    watch?.dayTimes || {
+      monday: [],
+      tuesday: [],
+      wednesday: [],
+      thursday: [],
+      friday: [],
+      saturday: [],
+      sunday: [],
     }
+  );
+  
+  // Track which days are enabled (have times selected)
+  const [enabledDays, setEnabledDays] = useState<Set<string>>(() => {
+    const enabled = new Set<string>();
+    if (watch?.dayTimes) {
+      DAYS.forEach(day => {
+        if (watch.dayTimes[day] && watch.dayTimes[day].length > 0) {
+          enabled.add(day);
+        }
+      });
+    }
+    return enabled;
+  });
+  
+  const [submitting, setSubmitting] = useState(false);
+  
+  const toggleDay = (day: typeof DAYS[number]) => {
+    setEnabledDays(prev => {
+      const next = new Set(prev);
+      if (next.has(day)) {
+        next.delete(day);
+        // Clear times when disabling day
+        setDayTimes(prevTimes => ({ ...prevTimes, [day]: [] }));
+      } else {
+        next.add(day);
+      }
+      return next;
+    });
+  };
+
+  const toggleTime = (day: typeof DAYS[number], time: string) => {
+    setDayTimes(prev => {
+      const newTimes = prev[day].includes(time)
+        ? prev[day].filter(t => t !== time)
+        : [...prev[day], time].sort();
+      
+      // Auto-enable day if times are added, auto-disable if all times removed
+      setEnabledDays(prevEnabled => {
+        const next = new Set(prevEnabled);
+        if (newTimes.length > 0) {
+          next.add(day);
+        } else {
+          next.delete(day);
+        }
+        return next;
+      });
+      
+      return {
+        ...prev,
+        [day]: newTimes,
+      };
+    });
+  };
+
+  // Get days to display based on active tab
+  const getDaysToDisplay = () => {
+    switch (dayViewTab) {
+      case 'weekdays':
+        return WEEKDAYS;
+      case 'weekends':
+        return WEEKENDS;
+      default:
+        return DAYS;
+    }
+  };
+
+  // Quick selection helpers
+  const selectTimeRange = (day: typeof DAYS[number], startTime: string, endTime: string) => {
+    const startIdx = timeSlots.indexOf(startTime);
+    const endIdx = timeSlots.indexOf(endTime);
+    if (startIdx === -1 || endIdx === -1) return;
+    
+    const range = timeSlots.slice(startIdx, endIdx + 1);
+    setDayTimes(prev => ({
+      ...prev,
+      [day]: [...new Set([...prev[day], ...range])].sort(),
+    }));
+  };
+
+  const applyToDays = (days: readonly string[], times: string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [...times].sort();
+      });
+      return updated;
+    });
+  };
+
+  const clearDays = (days: readonly string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [];
+      });
+      return updated;
+    });
+  };
+
+  // Preset templates
+  const applyPreset = (preset: 'evening' | 'morning' | 'afternoon' | 'all-day') => {
+    let times: string[] = [];
+    switch (preset) {
+      case 'evening':
+        // Only include 6pm, 7pm, 8pm, 9pm, 10pm (exclude 12pm and 1pm-5pm)
+        times = timeSlots.filter(t => {
+          return t === '6pm' || t === '7pm' || t === '8pm' || t === '9pm' || t === '10pm';
+        });
+        break;
+      case 'morning':
+        times = timeSlots.filter(t => {
+          const hour = parseInt(t.replace(/[^0-9]/g, ''));
+          const isAM = t.includes('am');
+          return isAM && hour >= 7 && hour <= 12;
+        });
+        break;
+      case 'afternoon':
+        // Include 12pm and 1pm-5pm
+        times = timeSlots.filter(t => {
+          return t === '12pm' || t === '1pm' || t === '2pm' || t === '3pm' || t === '4pm' || t === '5pm';
+        });
+        break;
+      case 'all-day':
+        times = [...timeSlots];
+        break;
+    }
+    applyToDays(DAYS, times);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (weekdayTimes.length === 0 && weekendTimes.length === 0) {
-      alert("Please select at least one time slot for weekdays or weekends");
+    
+    // Validate at least one venue selected
+    if (selectedVenues.length === 0) {
+      alert("Please select at least one venue");
+      return;
+    }
+
+    // Validate at least one time slot selected across all days
+    const hasAnyTime = DAYS.some(day => dayTimes[day].length > 0);
+    if (!hasAnyTime) {
+      alert("Please select at least one time slot for any day");
       return;
     }
 
     setSubmitting(true);
     try {
       await onSubmit({
-        venueSlug,
-        weekdayTimes,
-        weekendTimes,
+        venueSlugs: selectedVenues,
+        dayTimes,
       });
     } finally {
       setSubmitting(false);
     }
   };
 
+  const filteredVenues = VENUES.filter(venue =>
+    venue.name.toLowerCase().includes(venueSearch.toLowerCase())
+  );
+
+  const removeVenue = (slug: string) => {
+    setSelectedVenues(prev => prev.filter(v => v !== slug));
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
         <div className="p-6 border-b dark:border-gray-700">
-          <h2 className="text-xl font-semibold">
-            {watch ? "Edit Watch" : "Create New Watch"}
-          </h2>
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold">
+                {watch ? "Edit Watch" : "Create New Watch"}
+              </h2>
+              {!watch && (
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  Select venues and times to get notified when slots become available
+                </p>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              disabled={submitting}
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Venue Selection */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Venue</label>
-            <select
-              value={venueSlug || ""}
-              onChange={(e) =>
-                setVenueSlug(e.target.value || null)
-              }
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
-            >
-              <option value="">All Venues</option>
-              {VENUES.map((venue) => (
-                <option key={venue.slug} value={venue.slug}>
-                  {venue.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Weekday Times */}
+          {/* Venue Selection - Enhanced with chips */}
           <div>
             <label className="block text-sm font-medium mb-2">
-              Weekday Times (Mon-Fri)
+              Select Venues {!watch && <span className="text-gray-500 font-normal">(select multiple)</span>}
             </label>
-            <div className="grid grid-cols-4 gap-2">
-              {timeSlots.map((time) => (
-                <button
-                  key={time}
-                  type="button"
-                  onClick={() =>
-                    toggleTime(time, weekdayTimes, setWeekdayTimes)
-                  }
-                  className={`p-2 rounded text-sm border transition-colors cursor-pointer ${
-                    weekdayTimes.includes(time)
-                      ? "bg-green-600 text-white border-green-600"
-                      : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+            
+            {/* Selected venues as chips */}
+            {selectedVenues.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedVenues.map((slug) => {
+                  const venue = VENUES.find(v => v.slug === slug);
+                  return (
+                    <span
+                      key={slug}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded-full text-sm"
+                    >
+                      {venue?.name}
+                      {!watch && (
+                        <button
+                          type="button"
+                          onClick={() => removeVenue(slug)}
+                          className="ml-1 hover:text-green-600 dark:hover:text-green-200"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!watch) setVenueDropdownOpen(!venueDropdownOpen);
+                }}
+                className={`w-full p-3 border-2 rounded-lg text-left flex items-center justify-between transition-colors ${
+                  watch 
+                    ? 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 cursor-not-allowed opacity-60'
+                    : selectedVenues.length > 0
+                    ? 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700 hover:bg-green-100 dark:hover:bg-green-900/30 cursor-pointer'
+                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:border-green-400 dark:hover:border-green-600 cursor-pointer'
+                }`}
+                disabled={!!watch}
+              >
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {selectedVenues.length === 0
+                    ? "Click to select venues..."
+                    : selectedVenues.length === 1
+                    ? VENUES.find((v) => v.slug === selectedVenues[0])?.name || "Select venues..."
+                    : `${selectedVenues.length} venues selected`}
+                </span>
+                <svg
+                  className={`w-5 h-5 text-gray-500 transition-transform ${
+                    venueDropdownOpen ? "rotate-180" : ""
                   }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  {time}
-                </button>
-              ))}
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              {venueDropdownOpen && !watch && (
+                <>
+                  <div
+                    className="fixed inset-0"
+                    style={{ zIndex: 55 }}
+                    onClick={() => {
+                      setVenueDropdownOpen(false);
+                      setVenueSearch("");
+                    }}
+                  />
+                  <div 
+                    className="absolute w-full mt-1 bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 rounded-lg shadow-xl max-h-80 overflow-hidden flex flex-col"
+                    style={{ zIndex: 60 }}
+                  >
+                    {/* Search input */}
+                    <div className="p-2 border-b dark:border-gray-700">
+                      <input
+                        type="text"
+                        placeholder="Search venues..."
+                        value={venueSearch}
+                        onChange={(e) => setVenueSearch(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 dark:bg-gray-700 dark:text-white"
+                      />
+                    </div>
+                    
+                    <div className="overflow-y-auto max-h-64">
+                      <div className="p-2">
+                        {/* Select All Checkbox */}
+                        <label
+                          className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-200 dark:border-gray-700 mb-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filteredVenues.length > 0 && filteredVenues.every(v => selectedVenues.includes(v.slug))}
+                            ref={(input) => {
+                              if (input) {
+                                const selectedCount = filteredVenues.filter(v => selectedVenues.includes(v.slug)).length;
+                                input.indeterminate = selectedCount > 0 && selectedCount < filteredVenues.length;
+                              }
+                            }}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const newVenues = [...new Set([...selectedVenues, ...filteredVenues.map(v => v.slug)])];
+                                setSelectedVenues(newVenues);
+                              } else {
+                                setSelectedVenues(selectedVenues.filter(v => !filteredVenues.some(fv => fv.slug === v)));
+                              }
+                            }}
+                            className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                          />
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {venueSearch ? `All (${filteredVenues.length})` : "All Venues"}
+                          </span>
+                        </label>
+
+                        {filteredVenues.length === 0 ? (
+                          <div className="p-4 text-center text-sm text-gray-500 dark:text-gray-400">
+                            No venues found
+                          </div>
+                        ) : (
+                          filteredVenues.map((venue) => {
+                            const isSelected = selectedVenues.includes(venue.slug);
+                            return (
+                              <label
+                                key={venue.slug}
+                                className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedVenues([...selectedVenues, venue.slug]);
+                                    } else {
+                                      setSelectedVenues(selectedVenues.filter(v => v !== venue.slug));
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                                />
+                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                  {venue.name}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            {weekdayTimes.length > 0 && (
-              <p className="mt-2 text-sm text-gray-500">
-                Selected: {weekdayTimes.join(", ")}
+            {watch && (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Venue cannot be changed when editing. Delete and create new watches to change venues.
               </p>
             )}
           </div>
 
-          {/* Weekend Times */}
+          {/* Quick Presets */}
           <div>
-            <label className="block text-sm font-medium mb-2">
-              Weekend Times (Sat-Sun)
-            </label>
-            <div className="grid grid-cols-4 gap-2">
-              {timeSlots.map((time) => (
+            <label className="block text-sm font-medium mb-2">Quick Presets</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyPreset('evening')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                🌆 Evening (6pm-10pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('morning')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                🌅 Morning (7am-12pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('afternoon')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                ☀️ Afternoon (12pm-5pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('all-day')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                🕐 All Day
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Day Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Quick Day Selection</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const weekdaysTimes = WEEKDAYS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekdaysTimes.length > 0 
+                    ? [...new Set(weekdaysTimes)].sort()
+                    : ['6pm', '7pm', '8pm'];
+                  applyToDays(WEEKDAYS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+              >
+                Apply to Weekdays
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const weekendTimes = WEEKENDS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekendTimes.length > 0 
+                    ? [...new Set(weekendTimes)].sort()
+                    : ['9am', '10am', '11am', '12pm', '1pm', '2pm'];
+                  applyToDays(WEEKENDS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+              >
+                Apply to Weekends
+              </button>
+              <button
+                type="button"
+                onClick={() => clearDays(DAYS)}
+                className="px-3 py-1.5 text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+              >
+                Clear All Days
+              </button>
+            </div>
+          </div>
+
+          {/* Day Time Selectors - Tabbed Interface */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <label className="block text-sm font-medium">
+                Select times for each day
+              </label>
+              {/* Day View Tabs */}
+              <div className="flex gap-1 bg-gray-100 dark:bg-gray-700 p-1 rounded-lg">
                 <button
-                  key={time}
                   type="button"
-                  onClick={() =>
-                    toggleTime(time, weekendTimes, setWeekendTimes)
-                  }
-                  className={`p-2 rounded text-sm border transition-colors cursor-pointer ${
-                    weekendTimes.includes(time)
-                      ? "bg-green-600 text-white border-green-600"
-                      : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                  onClick={() => setDayViewTab('all')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'all'
+                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
                   }`}
                 >
-                  {time}
+                  All Days
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekdays')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekdays'
+                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Weekdays
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekends')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekends'
+                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Weekends
+                </button>
+              </div>
             </div>
-            {weekendTimes.length > 0 && (
-              <p className="mt-2 text-sm text-gray-500">
-                Selected: {weekendTimes.join(", ")}
-              </p>
-            )}
+            
+            {/* Days Grid - 2 columns for compact view */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {getDaysToDisplay().map((day) => {
+                const selectedCount = dayTimes[day].length;
+                const isEnabled = enabledDays.has(day);
+                return (
+                  <div key={day} className={`border-2 dark:border-gray-700 rounded-lg p-4 transition-all ${
+                    isEnabled 
+                      ? 'bg-white dark:bg-gray-800 hover:border-green-400 dark:hover:border-green-600' 
+                      : 'bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-700 opacity-60'
+                  }`}>
+                    {/* Day Header with Toggle */}
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b dark:border-gray-700">
+                      <div className="flex items-center gap-2 flex-1">
+                        {/* Day Toggle */}
+                        <button
+                          type="button"
+                          onClick={() => toggleDay(day)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
+                            isEnabled
+                              ? 'bg-green-600'
+                              : 'bg-gray-300 dark:bg-gray-600'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              isEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <h3 className={`text-sm font-semibold ${isEnabled ? '' : 'text-gray-400 dark:text-gray-500'}`}>
+                            {DAY_LABELS[day]}
+                          </h3>
+                          {selectedCount > 0 && isEnabled && (
+                            <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs font-medium">
+                              {selectedCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {selectedCount > 0 && isEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => setDayTimes(prev => ({ ...prev, [day]: [] }))}
+                          className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    
+                    {/* Only show time selection if day is enabled */}
+                    {isEnabled && (
+                      <>
+                        {/* Quick time range buttons */}
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          <button
+                            type="button"
+                            onClick={() => selectTimeRange(day, '6pm', '10pm')}
+                            className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            + Evening
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => selectTimeRange(day, '7am', '12pm')}
+                            className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            + Morning
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => selectTimeRange(day, '12pm', '5pm')}
+                            className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                          >
+                            + Afternoon
+                          </button>
+                        </div>
+                        
+                        {/* Time slot grid - more compact */}
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {timeSlots.map((time) => (
+                            <button
+                              key={time}
+                              type="button"
+                              onClick={() => toggleTime(day, time)}
+                              className={`p-1.5 rounded text-xs font-medium border-2 transition-all cursor-pointer ${
+                                dayTimes[day].includes(time)
+                                  ? "bg-green-600 text-white border-green-600 shadow-sm"
+                                  : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-400 dark:hover:border-green-600"
+                              }`}
+                            >
+                              {time}
+                            </button>
+                          ))}
+                        </div>
+                        
+                        {dayTimes[day].length > 0 && (
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                            <span className="font-medium">Selected:</span> {dayTimes[day].join(", ")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    {!isEnabled && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 italic text-center py-2">
+                        Toggle to enable this day
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="text-sm text-blue-800 dark:text-blue-300">
+                <p className="font-medium mb-1">Summary</p>
+                <p>
+                  {selectedVenues.length === 0 ? (
+                    "Select at least one venue"
+                  ) : (
+                    <>
+                      Creating <strong>{selectedVenues.length}</strong> watch{selectedVenues.length > 1 ? 'es' : ''} for{' '}
+                      <strong>{selectedVenues.length === 1 ? VENUES.find(v => v.slug === selectedVenues[0])?.name : `${selectedVenues.length} venues`}</strong>
+                      {DAYS.some(day => dayTimes[day].length > 0) && (
+                        <> with time preferences for {DAYS.filter(day => dayTimes[day].length > 0).length} day{DAYS.filter(day => dayTimes[day].length > 0).length > 1 ? 's' : ''}</>
+                      )}
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Form Actions */}
@@ -1608,17 +2607,430 @@ function WatchFormModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              className="px-5 py-2.5 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors"
               disabled={submitting}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium shadow-md hover:shadow-lg transition-all disabled:cursor-not-allowed"
+              disabled={submitting || selectedVenues.length === 0}
+            >
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Saving...
+                </span>
+              ) : watch ? (
+                "Update Watch"
+              ) : (
+                `Create ${selectedVenues.length > 1 ? `${selectedVenues.length} ` : ''}Watch${selectedVenues.length > 1 ? 'es' : ''}`
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Bulk Edit Watch Modal Component
+function BulkEditWatchModal({
+  selectedCount,
+  onClose,
+  onSubmit,
+  timeSlots,
+}: {
+  selectedCount: number;
+  onClose: () => void;
+  onSubmit: (dayTimes: {
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }) => void;
+  timeSlots: string[];
+}) {
+  const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+  const DAY_LABELS = {
+    monday: 'Monday',
+    tuesday: 'Tuesday',
+    wednesday: 'Wednesday',
+    thursday: 'Thursday',
+    friday: 'Friday',
+    saturday: 'Saturday',
+    sunday: 'Sunday',
+  };
+  const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
+  const WEEKENDS = ['saturday', 'sunday'] as const;
+
+  const [dayTimes, setDayTimes] = useState<{
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }>({
+    monday: [],
+    tuesday: [],
+    wednesday: [],
+    thursday: [],
+    friday: [],
+    saturday: [],
+    sunday: [],
+  });
+  const [dayViewTab, setDayViewTab] = useState<'all' | 'weekdays' | 'weekends'>('all');
+  const [submitting, setSubmitting] = useState(false);
+
+  const toggleTime = (day: typeof DAYS[number], time: string) => {
+    setDayTimes(prev => ({
+      ...prev,
+      [day]: prev[day].includes(time)
+        ? prev[day].filter(t => t !== time)
+        : [...prev[day], time].sort(),
+    }));
+  };
+
+  const selectTimeRange = (day: typeof DAYS[number], startTime: string, endTime: string) => {
+    const startIdx = timeSlots.indexOf(startTime);
+    const endIdx = timeSlots.indexOf(endTime);
+    if (startIdx === -1 || endIdx === -1) return;
+    
+    const range = timeSlots.slice(startIdx, endIdx + 1);
+    setDayTimes(prev => ({
+      ...prev,
+      [day]: [...new Set([...prev[day], ...range])].sort(),
+    }));
+  };
+
+  const applyToDays = (days: readonly string[], times: string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [...times].sort();
+      });
+      return updated;
+    });
+  };
+
+  const clearDays = (days: readonly string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [];
+      });
+      return updated;
+    });
+  };
+
+  const applyPreset = (preset: 'evening' | 'morning' | 'afternoon' | 'all-day') => {
+    let times: string[] = [];
+    switch (preset) {
+      case 'evening':
+        times = timeSlots.filter(t => {
+          return t === '6pm' || t === '7pm' || t === '8pm' || t === '9pm' || t === '10pm';
+        });
+        break;
+      case 'morning':
+        times = timeSlots.filter(t => {
+          const hour = parseInt(t.replace(/[^0-9]/g, ''));
+          const isAM = t.includes('am');
+          return isAM && hour >= 7 && hour <= 12;
+        });
+        break;
+      case 'afternoon':
+        times = timeSlots.filter(t => {
+          return t === '12pm' || t === '1pm' || t === '2pm' || t === '3pm' || t === '4pm' || t === '5pm';
+        });
+        break;
+      case 'all-day':
+        times = [...timeSlots];
+        break;
+    }
+    applyToDays(DAYS, times);
+  };
+
+  const getDaysToDisplay = () => {
+    switch (dayViewTab) {
+      case 'weekdays':
+        return WEEKDAYS;
+      case 'weekends':
+        return WEEKENDS;
+      default:
+        return DAYS;
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const hasAnyTime = DAYS.some(day => dayTimes[day].length > 0);
+    if (!hasAnyTime) {
+      alert("Please select at least one time slot for any day");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit(dayTimes);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+        <div className="p-6 border-b dark:border-gray-700">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold">Bulk Edit Watches</h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Apply the same time preferences to {selectedCount} selected watch{selectedCount > 1 ? 'es' : ''}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               disabled={submitting}
             >
-              {submitting ? "Saving..." : watch ? "Update Watch" : "Create Watch"}
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Quick Presets */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Quick Presets</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyPreset('evening')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                🌆 Evening (6pm-10pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('morning')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                🌅 Morning (7am-12pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('afternoon')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                ☀️ Afternoon (12pm-5pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('all-day')}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                🕐 All Day
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Day Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Quick Day Selection</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const weekdaysTimes = WEEKDAYS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekdaysTimes.length > 0 
+                    ? [...new Set(weekdaysTimes)].sort()
+                    : ['6pm', '7pm', '8pm'];
+                  applyToDays(WEEKDAYS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+              >
+                Apply to Weekdays
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const weekendTimes = WEEKENDS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekendTimes.length > 0 
+                    ? [...new Set(weekendTimes)].sort()
+                    : ['9am', '10am', '11am', '12pm', '1pm', '2pm'];
+                  applyToDays(WEEKENDS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-700 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+              >
+                Apply to Weekends
+              </button>
+              <button
+                type="button"
+                onClick={() => clearDays(DAYS)}
+                className="px-3 py-1.5 text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+              >
+                Clear All Days
+              </button>
+            </div>
+          </div>
+
+          {/* Day Time Selectors - Tabbed Interface */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <label className="block text-sm font-medium">
+                Select times for each day
+              </label>
+              <div className="flex gap-1 bg-gray-100 dark:bg-gray-700 p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('all')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'all'
+                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  All Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekdays')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekdays'
+                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Weekdays
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekends')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekends'
+                      ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  Weekends
+                </button>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {getDaysToDisplay().map((day) => {
+                const selectedCount = dayTimes[day].length;
+                return (
+                  <div key={day} className="border-2 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 transition-all hover:border-green-400 dark:hover:border-green-600">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b dark:border-gray-700">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold">{DAY_LABELS[day]}</h3>
+                        {selectedCount > 0 && (
+                          <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-xs font-medium">
+                            {selectedCount}
+                          </span>
+                        )}
+                      </div>
+                      {selectedCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setDayTimes(prev => ({ ...prev, [day]: [] }))}
+                          className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      <button
+                        type="button"
+                        onClick={() => selectTimeRange(day, '6pm', '10pm')}
+                        className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        + Evening
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectTimeRange(day, '7am', '12pm')}
+                        className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        + Morning
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectTimeRange(day, '12pm', '5pm')}
+                        className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        + Afternoon
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {timeSlots.map((time) => (
+                        <button
+                          key={time}
+                          type="button"
+                          onClick={() => toggleTime(day, time)}
+                          className={`p-1.5 rounded text-xs font-medium border-2 transition-all cursor-pointer ${
+                            dayTimes[day].includes(time)
+                              ? "bg-green-600 text-white border-green-600 shadow-sm"
+                              : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-green-50 dark:hover:bg-green-900/20 hover:border-green-400 dark:hover:border-green-600"
+                          }`}
+                        >
+                          {time}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    {dayTimes[day].length > 0 && (
+                      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                        <span className="font-medium">Selected:</span> {dayTimes[day].join(", ")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div className="flex gap-3 justify-end pt-4 border-t dark:border-gray-700">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2.5 border-2 border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors"
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium shadow-md hover:shadow-lg transition-all disabled:cursor-not-allowed"
+              disabled={submitting}
+            >
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Updating...
+                </span>
+              ) : (
+                `Apply to ${selectedCount} Watch${selectedCount > 1 ? 'es' : ''}`
+              )}
             </button>
           </div>
         </form>
@@ -2145,14 +3557,20 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                                   {userDetails.watches.map((watch: any) => (
                                     <div key={watch.id} className="bg-white dark:bg-gray-800 rounded p-3 text-sm">
                                       <div className="flex justify-between items-start">
-                                        <div>
+                                        <div className="flex-1">
                                           <p className="font-medium">{watch.venueName || "All Venues"}</p>
-                                          <p className="text-xs text-gray-500 mt-1">
-                                            Weekdays: {watch.weekdayTimes?.length > 0 ? watch.weekdayTimes.join(", ") : "None"}
-                                          </p>
-                                          <p className="text-xs text-gray-500">
-                                            Weekends: {watch.weekendTimes?.length > 0 ? watch.weekendTimes.join(", ") : "None"}
-                                          </p>
+                                          <div className="mt-2 space-y-1">
+                                            {watch.dayTimes && Object.entries(watch.dayTimes)
+                                              .filter(([_, times]: [string, any]) => times?.length > 0)
+                                              .map(([day, times]: [string, any]) => (
+                                                <p key={day} className="text-xs text-gray-500">
+                                                  <span className="capitalize font-medium">{day}:</span> {times.join(", ")}
+                                                </p>
+                                              ))}
+                                            {watch.dayTimes && Object.values(watch.dayTimes).every((times: any) => !times || times.length === 0) && (
+                                              <p className="text-xs text-gray-500 italic">No times set</p>
+                                            )}
+                                          </div>
                                         </div>
                                         <span className={`px-2 py-0.5 text-xs rounded ${watch.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
                                           {watch.active ? "Active" : "Paused"}
