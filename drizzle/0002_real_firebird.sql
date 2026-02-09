@@ -1,14 +1,27 @@
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 
 -- Clean up orphaned data before migration
-DELETE FROM `notification_log` WHERE `user_id` NOT IN (SELECT `id` FROM `users`);--> statement-breakpoint
-DELETE FROM `notification_log` WHERE `channel_id` NOT IN (SELECT `id` FROM `notification_channels`);--> statement-breakpoint
+-- Clear all notification_log data first (it's just historical notification data)
+DELETE FROM `notification_log`;--> statement-breakpoint
 DELETE FROM `notification_channels` WHERE `user_id` NOT IN (SELECT `id` FROM `users`);--> statement-breakpoint
 DELETE FROM `watches` WHERE `user_id` NOT IN (SELECT `id` FROM `users`);--> statement-breakpoint
 DELETE FROM `watches` WHERE `venue_id` IS NOT NULL AND `venue_id` NOT IN (SELECT `id` FROM `venues`);--> statement-breakpoint
 DELETE FROM `slots` WHERE `venue_id` NOT IN (SELECT `id` FROM `venues`);--> statement-breakpoint
 
--- Migrate notification_channels with cascade delete
+-- Migrate notification_log FIRST (child table)
+CREATE TABLE `__new_notification_log` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`user_id` integer NOT NULL,
+	`channel_id` integer NOT NULL,
+	`slot_key` text NOT NULL,
+	`sent_at` text DEFAULT CURRENT_TIMESTAMP,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`channel_id`) REFERENCES `notification_channels`(`id`) ON UPDATE no action ON DELETE cascade
+);--> statement-breakpoint
+DROP TABLE `notification_log`;--> statement-breakpoint
+ALTER TABLE `__new_notification_log` RENAME TO `notification_log`;--> statement-breakpoint
+
+-- Migrate notification_channels SECOND (parent table)
 CREATE TABLE `__new_notification_channels` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer NOT NULL,
@@ -20,20 +33,6 @@ CREATE TABLE `__new_notification_channels` (
 INSERT INTO `__new_notification_channels`("id", "user_id", "type", "destination", "active") SELECT "id", "user_id", "type", "destination", "active" FROM `notification_channels`;--> statement-breakpoint
 DROP TABLE `notification_channels`;--> statement-breakpoint
 ALTER TABLE `__new_notification_channels` RENAME TO `notification_channels`;--> statement-breakpoint
-
--- Migrate notification_log with cascade delete
-CREATE TABLE `__new_notification_log` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`user_id` integer NOT NULL,
-	`channel_id` integer NOT NULL,
-	`slot_key` text NOT NULL,
-	`sent_at` text DEFAULT CURRENT_TIMESTAMP,
-	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`channel_id`) REFERENCES `notification_channels`(`id`) ON UPDATE no action ON DELETE cascade
-);--> statement-breakpoint
-INSERT INTO `__new_notification_log`("id", "user_id", "channel_id", "slot_key", "sent_at") SELECT "id", "user_id", "channel_id", "slot_key", "sent_at" FROM `notification_log`;--> statement-breakpoint
-DROP TABLE `notification_log`;--> statement-breakpoint
-ALTER TABLE `__new_notification_log` RENAME TO `notification_log`;--> statement-breakpoint
 
 -- Migrate slots with cascade delete
 CREATE TABLE `__new_slots` (
