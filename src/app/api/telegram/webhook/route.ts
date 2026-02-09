@@ -2,12 +2,19 @@ import { NextResponse } from "next/server";
 import { sendTelegramMessage } from "@/lib/notifiers/telegram";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
 
 // POST /api/telegram/webhook - Handle incoming Telegram bot messages
 export async function POST(request: Request) {
   if (!TELEGRAM_BOT_TOKEN) {
     return NextResponse.json({ error: "Telegram bot not configured" }, { status: 500 });
+  }
+
+  // Verify webhook authenticity
+  const secretHeader = request.headers.get("x-telegram-bot-api-secret-token");
+  if (!TELEGRAM_WEBHOOK_SECRET || secretHeader !== TELEGRAM_WEBHOOK_SECRET) {
+    console.error("Telegram webhook verification failed");
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {

@@ -32,7 +32,7 @@ async function runCleanup() {
     console.log(`Deleted ${deletedLogs.length} old notification logs`);
 
     // Vacuum database to reclaim space
-    db.run(sql`VACUUM`);
+    await db.run(sql`VACUUM`);
     console.log("Database vacuumed");
   } catch (error) {
     console.error("Cleanup failed:", error);
@@ -83,28 +83,40 @@ async function runScrapeJob() {
   }
 }
 
+// Track if a scrape job is currently running to prevent concurrent executions
+let isJobRunning = false;
+
 export async function POST(request: Request) {
-  // Verify cron secret if set (skip in development for easy testing)
-  if (CRON_SECRET && !isDev) {
+  // Verify cron secret (deny by default in production)
+  if (!isDev) {
+    if (!CRON_SECRET) {
+      console.error("CRON_SECRET is not configured");
+      return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
+    }
     const authHeader = request.headers.get("authorization");
     if (authHeader !== `Bearer ${CRON_SECRET}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }
 
+  // Check if a job is already running
+  if (isJobRunning) {
+    return NextResponse.json({ error: "Scrape job already running" }, { status: 409 });
+  }
+
   // Start the scrape job in the background (don't await)
-  runScrapeJob().catch((error) => {
-    console.error("Unhandled error in scrape job:", error);
-  });
+  isJobRunning = true;
+  runScrapeJob()
+    .catch((error) => {
+      console.error("Unhandled error in scrape job:", error);
+    })
+    .finally(() => {
+      isJobRunning = false;
+    });
 
   // Return immediately
   return NextResponse.json({
     success: true,
     message: "Scrape job started",
   });
-}
-
-// Also support GET for easy testing
-export async function GET(request: Request) {
-  return POST(request);
 }

@@ -15,6 +15,13 @@
       "when": 1769261949219,
       "tag": "0001_productive_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1770567743252,
+      "tag": "0002_real_firebird",
+      "breakpoints": true
     }
   ]
 }

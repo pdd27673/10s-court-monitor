@@ -79,28 +79,21 @@ const customAdapter: Adapter = {
   },
 
   async useVerificationToken(params) {
+    // Use DELETE...RETURNING to atomically retrieve and delete the token
+    // This prevents race conditions where the same token could be used twice
     const result = await db
-      .select()
-      .from(verificationTokens)
-      .where(
-        and(
-          eq(verificationTokens.identifier, params.identifier),
-          eq(verificationTokens.token, params.token)
-        )
-      );
-
-    if (result.length === 0) return null;
-
-    const token = result[0];
-
-    await db
       .delete(verificationTokens)
       .where(
         and(
           eq(verificationTokens.identifier, params.identifier),
           eq(verificationTokens.token, params.token)
         )
-      );
+      )
+      .returning();
+
+    if (result.length === 0) return null;
+
+    const token = result[0];
 
     return {
       identifier: token.identifier,

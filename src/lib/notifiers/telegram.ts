@@ -1,4 +1,5 @@
 import { SlotChange } from "../differ";
+import { escapeTelegramHtml } from "../utils/html-escape";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -48,11 +49,11 @@ export function formatSlotChangesForTelegram(changes: SlotChange[]): string {
       month: "short",
     });
 
-    lines.push(`📍 <b>${venueName}</b> - ${formattedDate}`);
+    lines.push(`📍 <b>${escapeTelegramHtml(venueName)}</b> - ${escapeTelegramHtml(formattedDate)}`);
 
     for (const slot of slots) {
-      const priceStr = slot.price ? ` (${slot.price})` : "";
-      lines.push(`  • ${slot.time} - ${slot.court}${priceStr}`);
+      const priceStr = slot.price ? ` (${escapeTelegramHtml(slot.price)})` : "";
+      lines.push(`  • ${escapeTelegramHtml(slot.time)} - ${escapeTelegramHtml(slot.court)}${priceStr}`);
     }
     lines.push("");
   }

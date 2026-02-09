@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { SlotChange } from "../differ";
 import { getBookingUrl } from "../utils/link-helpers";
+import { escapeHtml } from "../utils/html-escape";
 
 // Resend client for HTTP-based email
 const resend = process.env.RESEND_API_KEY
@@ -96,8 +97,8 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
     html += `
       <div style="margin-bottom: 24px; padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
         <div style="margin-bottom: 16px;">
-          <h2 style="margin: 0 0 6px 0; color: #111827; font-size: 20px; font-weight: 600;">${group.venueName}</h2>
-          <p style="margin: 0; color: #6b7280; font-size: 14px;">${formattedDate}</p>
+          <h2 style="margin: 0 0 6px 0; color: #111827; font-size: 20px; font-weight: 600;">${escapeHtml(group.venueName)}</h2>
+          <p style="margin: 0; color: #6b7280; font-size: 14px;">${escapeHtml(formattedDate)}</p>
         </div>
         
         <div style="background: #f9fafb; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
@@ -106,17 +107,17 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
     `;
 
     for (const slot of sortedSlots) {
-      const priceStr = slot.price ? ` <span style="color: #059669; font-weight: 500;">${slot.price}</span>` : "";
-      html += `<li style="margin: 6px 0; color: #374151; font-size: 14px;">• ${slot.time} - <strong>${slot.court}</strong>${priceStr}</li>`;
+      const priceStr = slot.price ? ` <span style="color: #059669; font-weight: 500;">${escapeHtml(slot.price)}</span>` : "";
+      html += `<li style="margin: 6px 0; color: #374151; font-size: 14px;">• ${escapeHtml(slot.time)} - <strong>${escapeHtml(slot.court)}</strong>${priceStr}</li>`;
     }
 
     html += `
           </ul>
         </div>
         
-        <a href="${bookingUrl}" 
+        <a href="${escapeHtml(bookingUrl)}" 
            style="display: inline-block; width: 100%; text-align: center; padding: 14px 24px; background: #16a34a; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; transition: background-color 0.2s;">
-          Book ${group.venueName} →
+          Book ${escapeHtml(group.venueName)} →
         </a>
       </div>
     `;

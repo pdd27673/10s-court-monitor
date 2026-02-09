@@ -23,12 +23,26 @@ const nextConfig: NextConfig = {
             value: 'DENY'
           },
           {
-            key: 'X-XSS-Protection',
-            value: '1; mode=block'
-          },
-          {
             key: 'Referrer-Policy',
             value: 'origin-when-cross-origin'
+          },
+          {
+            key: 'Content-Security-Policy',
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Next.js requires unsafe-eval in dev
+              "style-src 'self' 'unsafe-inline'", // Tailwind requires unsafe-inline
+              "img-src 'self' data: https:",
+              "font-src 'self' data:",
+              "connect-src 'self' https://api.telegram.org",
+              "frame-ancestors 'none'",
+              "base-uri 'self'",
+              "form-action 'self'",
+            ].join('; ')
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()'
           },
         ],
       },

@@ -23,8 +23,21 @@ export async function PUT(
 
     const { id } = await params;
     const userId = parseInt(id, 10);
+
+    if (isNaN(userId)) {
+      return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
+    }
+
     const body = await request.json();
     const { name, isAllowed, isAdmin } = body;
+
+    // Prevent admin from demoting themselves
+    if (userId === adminUser[0].id && isAdmin === false) {
+      return NextResponse.json(
+        { error: "Cannot remove your own admin privileges" },
+        { status: 403 }
+      );
+    }
 
     // Update user
     const [updatedUser] = await db
@@ -68,10 +81,19 @@ export async function DELETE(
     const { id } = await params;
     const userId = parseInt(id, 10);
 
-    // Delete user's data
-    await db.delete(notificationLog).where(eq(notificationLog.userId, userId));
-    await db.delete(notificationChannels).where(eq(notificationChannels.userId, userId));
-    await db.delete(watches).where(eq(watches.userId, userId));
+    if (isNaN(userId)) {
+      return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
+    }
+
+    // Prevent admin from deleting themselves
+    if (userId === adminUser[0].id) {
+      return NextResponse.json(
+        { error: "Cannot delete your own account" },
+        { status: 403 }
+      );
+    }
+
+    // Delete user's data (cascade deletes will handle related records due to schema)
     await db.delete(users).where(eq(users.id, userId));
 
     return NextResponse.json({ success: true });
