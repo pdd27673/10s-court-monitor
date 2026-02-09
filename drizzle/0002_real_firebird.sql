@@ -50,7 +50,7 @@ INSERT INTO `__new_slots`("id", "venue_id", "date", "time", "court", "status", "
 DROP TABLE `slots`;--> statement-breakpoint
 ALTER TABLE `__new_slots` RENAME TO `slots`;--> statement-breakpoint
 
--- Migrate watches with cascade delete
+-- Migrate watches with cascade delete and add day_times column
 CREATE TABLE `__new_watches` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer NOT NULL,
@@ -62,9 +62,24 @@ CREATE TABLE `__new_watches` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`venue_id`) REFERENCES `venues`(`id`) ON UPDATE no action ON DELETE cascade
 );--> statement-breakpoint
-INSERT INTO `__new_watches`("id", "user_id", "venue_id", "day_times", "weekday_times", "weekend_times", "active") SELECT "id", "user_id", "venue_id", "day_times", "weekday_times", "weekend_times", "active" FROM `watches`;--> statement-breakpoint
+INSERT INTO `__new_watches`("id", "user_id", "venue_id", "weekday_times", "weekend_times", "active") SELECT "id", "user_id", "venue_id", "weekday_times", "weekend_times", "active" FROM `watches`;--> statement-breakpoint
 DROP TABLE `watches`;--> statement-breakpoint
 ALTER TABLE `__new_watches` RENAME TO `watches`;--> statement-breakpoint
+
+-- Migrate data from old weekday_times/weekend_times to new day_times format
+UPDATE `watches`
+SET `day_times` = (
+  SELECT json_object(
+    'monday', COALESCE(json(`weekday_times`), json('[]')),
+    'tuesday', COALESCE(json(`weekday_times`), json('[]')),
+    'wednesday', COALESCE(json(`weekday_times`), json('[]')),
+    'thursday', COALESCE(json(`weekday_times`), json('[]')),
+    'friday', COALESCE(json(`weekday_times`), json('[]')),
+    'saturday', COALESCE(json(`weekend_times`), json('[]')),
+    'sunday', COALESCE(json(`weekend_times`), json('[]'))
+  )
+)
+WHERE `weekday_times` IS NOT NULL OR `weekend_times` IS NOT NULL;--> statement-breakpoint
 
 -- Re-enable foreign keys and create indexes
 PRAGMA foreign_keys=ON;--> statement-breakpoint
