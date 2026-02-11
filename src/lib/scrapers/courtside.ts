@@ -1,17 +1,15 @@
 import * as cheerio from "cheerio";
 import UserAgent from "user-agents";
-import { proxyManager } from "../proxy-manager";
+import { proxyManager, proxyFetch } from "../proxy-manager";
 import { ScrapedSlot } from "./types";
 
 const MAX_RETRIES = 3;
-const RETRY_DELAY_BASE = 2000; // 2 seconds base, exponential backoff
+const RETRY_DELAY_BASE = 2000;
 
-// Generate browser-like headers
 function getHeaders(userAgent: string, referer?: string): Record<string, string> {
   const headers: Record<string, string> = {
     "User-Agent": userAgent,
-    Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-GB,en;q=0.9,en-US;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     DNT: "1",
@@ -39,91 +37,112 @@ async function fetchWithRetry(
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    // Generate fresh user agent for each attempt
     const userAgent = new UserAgent({ deviceCategory: "desktop" }).toString();
+    // Use regular rotating proxy (sticky sessions have auth issues)
+    const agent = proxyManager.getAgent();
 
-    // Create a sticky session (same IP for warmup + actual request)
-    const session = proxyManager.createStickySession();
-    const agent = session?.agent || null;
-
-    // First request: visit homepage to look like a real user and get cookies
     const homepageUrl = "https://tennistowerhamlets.com/";
 
     try {
-      if (attempt === 1) {
-        console.log(
-          `🔍 Fetching ${venueSlug} for ${date} ${agent ? "via sticky session" : "direct"}`
-        );
-      } else {
-        console.log(
-          `🔄 Retry ${attempt}/${MAX_RETRIES} for ${venueSlug} ${date} (new session/IP)`
-        );
-      }
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(`📍 ${venueSlug} | ${date} | Attempt ${attempt}/${MAX_RETRIES}`);
+      console.log(`   Agent: ${agent ? "via proxy" : "DIRECT (no proxy!)"}`);
+      console.log(`   UA: ${userAgent.slice(0, 60)}...`);
 
-      // Warm-up request to homepage using the same sticky session
-      const warmupResponse = await fetch(homepageUrl, {
+      // Warmup request
+      console.log(`\n   [1/2] Warmup: ${homepageUrl}`);
+      const warmupStart = Date.now();
+      const warmupResponse = await proxyFetch(homepageUrl, {
         agent,
         headers: getHeaders(userAgent),
-      } as RequestInit);
+        timeout: 15000,
+      });
+      const warmupMs = Date.now() - warmupStart;
 
-      // Small delay to simulate human browsing
-      await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+      console.log(`         Status: ${warmupResponse.status} ${warmupResponse.statusText} (${warmupMs}ms)`);
+      console.log(`         Size: ${warmupResponse.body.length} bytes`);
 
-      // Extract any cookies from warmup response
+      if (!warmupResponse.ok) {
+        console.log(`         ❌ Warmup failed!`);
+        throw new Error(`Warmup failed: ${warmupResponse.status}`);
+      }
+
+      // Human-like delay
+      const delay = 500 + Math.random() * 1000;
+      console.log(`         Waiting ${Math.round(delay)}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+
+      // Get cookies
       const cookies = warmupResponse.headers.get("set-cookie") || "";
+      if (cookies) {
+        console.log(`         Cookies: ${cookies.slice(0, 50)}...`);
+      }
 
-      // Now fetch the actual page with referer (using SAME agent = same IP)
-      const fetchOptions: RequestInit & { agent?: unknown } = {
+      // Main request
+      console.log(`\n   [2/2] Target: ${url}`);
+      const fetchStart = Date.now();
+      const response = await proxyFetch(url, {
         agent,
         headers: {
           ...getHeaders(userAgent, homepageUrl),
           ...(cookies && { Cookie: cookies.split(";")[0] }),
         },
-      };
+        timeout: 20000,
+      });
+      const fetchMs = Date.now() - fetchStart;
 
-      const response = await fetch(url, fetchOptions as RequestInit);
+      console.log(`         Status: ${response.status} ${response.statusText} (${fetchMs}ms)`);
+      console.log(`         Size: ${response.body.length} bytes`);
+      console.log(`         Content-Type: ${response.headers.get("content-type") || "unknown"}`);
+      console.log(`         Server: ${response.headers.get("server") || "unknown"}`);
 
+      const cfRay = response.headers.get("cf-ray");
+      if (cfRay) {
+        console.log(`         CF-Ray: ${cfRay} (Cloudflare)`);
+      }
+
+      const html = response.body;
+
+      // Check for blocking
       if (response.status === 404) {
-        // 404 might be a soft block - retry with new session/IP
-        throw new Error(`HTTP 404 - possible block, retrying...`);
+        console.log(`\n         ⚠️ 404 Response - analyzing...`);
+        console.log(`         Preview: ${html.slice(0, 200).replace(/\n/g, " ")}`);
+
+        if (html.includes("blocked") || html.includes("denied") || html.includes("captcha")) {
+          console.log(`         🚫 BLOCK PAGE detected!`);
+        } else if (html.includes("Page not found") || html.includes("Not Found")) {
+          console.log(`         📄 Genuine 404 page`);
+        }
+        throw new Error(`HTTP 404 - possible block`);
       }
 
       if (!response.ok) {
+        console.log(`         ❌ Error response: ${html.slice(0, 200)}`);
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const html = await response.text();
-
-      // Verify we got actual HTML (not a block page)
-      if (
-        html.includes("Access Denied") ||
-        html.includes("403 Forbidden") ||
-        html.includes("blocked") ||
-        html.length < 100
-      ) {
+      if (html.includes("Access Denied") || html.includes("403 Forbidden") || html.includes("blocked") || html.length < 100) {
+        console.log(`         🚫 BLOCKED! Body: ${html.slice(0, 200)}`);
         throw new Error(`Blocked or empty response`);
       }
 
-      console.log(`✅ Successfully fetched ${venueSlug} (${html.length} bytes)`);
+      const courtCount = (html.match(/label\.court|class="court"/g) || []).length;
+      console.log(`\n   ✅ SUCCESS: ${html.length} bytes, ~${courtCount} court elements`);
+
       return html;
     } catch (error) {
       lastError = error as Error;
-      console.warn(
-        `⚠️ Attempt ${attempt} failed for ${venueSlug}: ${lastError.message}`
-      );
+      console.log(`\n   ❌ FAILED: ${lastError.message}`);
 
       if (attempt < MAX_RETRIES) {
-        // Exponential backoff: 2s, 4s, 8s
-        const delay = RETRY_DELAY_BASE * Math.pow(2, attempt - 1);
-        console.log(`⏳ Waiting ${delay / 1000}s before retry...`);
-        await new Promise((r) => setTimeout(r, delay));
+        const backoff = RETRY_DELAY_BASE * Math.pow(2, attempt - 1);
+        console.log(`   ⏳ Retrying in ${backoff / 1000}s...`);
+        await new Promise((r) => setTimeout(r, backoff));
       }
     }
   }
 
-  throw new Error(
-    `Failed after ${MAX_RETRIES} attempts for ${url}: ${lastError?.message}`
-  );
+  throw new Error(`Failed after ${MAX_RETRIES} attempts for ${url}: ${lastError?.message}`);
 }
 
 export async function scrapeCourtside(
@@ -137,20 +156,17 @@ export async function scrapeCourtside(
   const $ = cheerio.load(html);
   const slots: ScrapedSlot[] = [];
 
-  // Parse the availability table
   $("table tr").each((_, row) => {
     const timeEl = $(row).find("th.time");
     const time = timeEl.text().trim();
     if (!time) return;
 
-    // Each court is in a label.court element
     $(row)
       .find("label.court")
       .each((_, courtLabel) => {
         const button = $(courtLabel).find("span.button");
         const priceSpan = $(courtLabel).find("span.price");
 
-        // Extract court name (e.g., "Court 1", "Court 2")
         const buttonText = button
           .clone()
           .children()
@@ -160,7 +176,6 @@ export async function scrapeCourtside(
           .trim();
         const court = buttonText || "Unknown";
 
-        // Determine status from button class
         let status: "available" | "booked" | "closed" | "coaching";
         let price: string | undefined;
 
@@ -170,10 +185,8 @@ export async function scrapeCourtside(
         } else if (button.hasClass("booked")) {
           status = "booked";
         } else if (button.hasClass("coaching") || button.hasClass("class")) {
-          // Coaching or class sessions
           status = "coaching";
         } else {
-          // maintenance or other = closed
           status = "closed";
         }
 
