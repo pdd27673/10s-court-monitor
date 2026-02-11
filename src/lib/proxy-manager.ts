@@ -1,4 +1,5 @@
 import { HttpsProxyAgent } from "https-proxy-agent";
+import got from "got";
 
 class ProxyManager {
   private host: string | null = null;
@@ -18,19 +19,20 @@ class ProxyManager {
     this.username = process.env.WEBSHARE_USERNAME || null;
     this.password = process.env.WEBSHARE_PASSWORD || null;
 
+    console.log(`🔧 Proxy config:`);
+    console.log(`   Host: ${this.host || "(not set)"}`);
+    console.log(`   Port: ${this.port}`);
+    console.log(`   Username: ${this.username ? `${this.username.slice(0, 8)}...` : "(not set)"}`);
+    console.log(`   Password: ${this.password ? "***" : "(not set)"}`);
+
     if (!this.host || !this.username || !this.password) {
-      console.warn(
-        "⚠️  Proxy not configured - requests will use direct connection"
-      );
+      console.warn("⚠️  Proxy not configured - requests will use direct connection");
       return;
     }
 
-    console.log(`✅ Rotating residential proxy initialized: ${this.host}:${this.port}`);
+    console.log(`✅ Rotating residential proxy ready: ${this.host}:${this.port}`);
   }
 
-  /**
-   * Get a new rotating proxy agent (new IP for each call)
-   */
   getAgent(): HttpsProxyAgent<string> | null {
     if (!this.initialized) {
       this.initialize();
@@ -41,17 +43,10 @@ class ProxyManager {
     }
 
     this.requestCount++;
-    console.log(`🔄 Proxy request #${this.requestCount} (new residential IP)`);
-
-    // Each call creates a new agent, getting a new IP from the rotating pool
     const proxyUrl = `http://${this.username}:${this.password}@${this.host}:${this.port}`;
     return new HttpsProxyAgent(proxyUrl);
   }
 
-  /**
-   * Get a sticky session agent - same IP for multiple requests
-   * Returns a session object with the agent and session ID
-   */
   createStickySession(): { agent: HttpsProxyAgent<string>; sessionId: string } | null {
     if (!this.initialized) {
       this.initialize();
@@ -64,15 +59,11 @@ class ProxyManager {
     this.sessionCount++;
     this.requestCount++;
 
-    // Generate unique session ID
     const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-    // For Webshare, append session ID to username for sticky sessions
-    // Format: username-session-SESSIONID
     const stickyUsername = `${this.username}-session-${sessionId}`;
     const proxyUrl = `http://${stickyUsername}:${this.password}@${this.host}:${this.port}`;
 
-    console.log(`🔗 Sticky session #${this.sessionCount} created (session: ${sessionId.slice(-6)})`);
+    console.log(`🔗 Sticky session #${this.sessionCount} (${sessionId.slice(-6)})`);
 
     return {
       agent: new HttpsProxyAgent(proxyUrl),
@@ -88,6 +79,90 @@ class ProxyManager {
       totalSessions: this.sessionCount,
     };
   }
+
+  async testConnection(): Promise<{ success: boolean; ip?: string; error?: string; direct?: string }> {
+    if (!this.initialized) {
+      this.initialize();
+    }
+
+    try {
+      console.log(`🧪 Testing direct connection...`);
+      const directResponse = await got("https://api.ipify.org?format=json", {
+        headers: { "User-Agent": "curl/7.88.1" },
+        timeout: { request: 10000 },
+      }).json<{ ip: string }>();
+      console.log(`   Direct IP: ${directResponse.ip}`);
+
+      const agent = this.getAgent();
+      if (!agent) {
+        return { success: false, error: "Proxy not configured", direct: directResponse.ip };
+      }
+
+      console.log(`🧪 Testing proxy connection...`);
+      const proxyResponse = await got("https://api.ipify.org?format=json", {
+        agent: { https: agent },
+        headers: { "User-Agent": "curl/7.88.1" },
+        timeout: { request: 15000 },
+      }).json<{ ip: string }>();
+      console.log(`   Proxy IP: ${proxyResponse.ip}`);
+
+      const success = directResponse.ip !== proxyResponse.ip;
+      console.log(success ? `✅ Proxy working! IPs differ.` : `❌ Proxy NOT working! Same IP.`);
+
+      return { success, ip: proxyResponse.ip, direct: directResponse.ip };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.log(`❌ Proxy test failed: ${msg}`);
+      return { success: false, error: msg };
+    }
+  }
 }
 
 export const proxyManager = new ProxyManager();
+
+/**
+ * Proxy-aware fetch using got
+ */
+export async function proxyFetch(
+  url: string,
+  options: {
+    agent?: HttpsProxyAgent<string> | null;
+    headers?: Record<string, string>;
+    method?: "GET" | "POST";
+    body?: string;
+    timeout?: number;
+  } = {}
+): Promise<{
+  ok: boolean;
+  status: number;
+  statusText: string;
+  headers: { get: (name: string) => string | null };
+  text: () => Promise<string>;
+  json: () => Promise<unknown>;
+  body: string;
+}> {
+  const response = await got(url, {
+    method: options.method || "GET",
+    headers: options.headers || {},
+    body: options.body,
+    timeout: { request: options.timeout || 30000 },
+    throwHttpErrors: false,
+    retry: { limit: 0 },
+    agent: options.agent ? { https: options.agent, http: options.agent } : undefined,
+  });
+
+  return {
+    ok: response.statusCode >= 200 && response.statusCode < 300,
+    status: response.statusCode,
+    statusText: response.statusMessage || "",
+    headers: {
+      get: (name: string) => {
+        const val = response.headers[name.toLowerCase()];
+        return Array.isArray(val) ? val[0] : val || null;
+      },
+    },
+    text: async () => response.body,
+    json: async () => JSON.parse(response.body),
+    body: response.body,
+  };
+}
