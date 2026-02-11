@@ -1,5 +1,6 @@
 import { ScrapedSlot } from "./types";
 import { Venue } from "../constants";
+import { proxyManager, proxyFetch } from "../proxy-manager";
 
 interface ClubSparkSession {
   ID: string;
@@ -45,18 +46,31 @@ export async function scrapeClubSpark(
 
   const url = `https://${venue.clubsparkHost}/v0/VenueBooking/${venue.clubsparkId}/GetVenueSessions?resourceID=&startDate=${date}&endDate=${date}&roleId=`;
 
-  const response = await fetch(url, {
+  const agent = proxyManager.getAgent();
+  console.log(`📍 ClubSpark ${venue.slug} | ${date} | ${agent ? "via proxy" : "DIRECT"}`);
+
+  const response = await proxyFetch(url, {
+    agent,
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; TennisNotifier/1.0)",
-      Accept: "application/json",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Accept: "application/json, text/plain, */*",
+      "Accept-Language": "en-GB,en;q=0.9,en-US;q=0.8",
+      "Accept-Encoding": "gzip, deflate, br",
+      Origin: `https://${venue.clubsparkHost}`,
+      Referer: `https://${venue.clubsparkHost}/Booking/BookByDate`,
+      "Sec-Fetch-Dest": "empty",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "same-origin",
+      "X-Requested-With": "XMLHttpRequest",
     },
+    timeout: 15000,
   });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: ${response.status}`);
   }
 
-  const data: ClubSparkResponse = await response.json();
+  const data = (await response.json()) as ClubSparkResponse;
   const slots: ScrapedSlot[] = [];
 
   // Generate all possible time slots based on operating hours

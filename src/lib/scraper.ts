@@ -4,42 +4,42 @@ import { proxyManager } from "./proxy-manager";
 
 export type { ScrapedSlot } from "./scrapers";
 
-// Random delay helper to avoid pattern detection
-const randomDelay = (min: number, max: number) =>
-  new Promise((resolve) =>
-    setTimeout(resolve, Math.random() * (max - min) + min)
-  );
+// Concurrency limit for parallel scraping (rotating proxies = different IP per request)
+const CONCURRENCY = parseInt(process.env.SCRAPE_CONCURRENCY || "5");
 
 export async function scrapeAllVenues(date: string): Promise<ScrapedSlot[]> {
-  const allSlots: ScrapedSlot[] = [];
+  console.log(`🚀 Scraping ${VENUES.length} venues (concurrency: ${CONCURRENCY})`);
+  const startTime = Date.now();
 
-  const delayMin = parseInt(process.env.VENUE_DELAY_MIN || "2000");
-  const delayMax = parseInt(process.env.VENUE_DELAY_MAX || "6000");
-
-  for (let i = 0; i < VENUES.length; i++) {
-    const venue = VENUES[i];
-
-    try {
+  // Scrape all venues in parallel with concurrency limit
+  const results = await Promise.allSettled(
+    VENUES.map(async (venue, index) => {
+      // Stagger start times slightly to avoid thundering herd
+      await new Promise((r) => setTimeout(r, index * 200));
       const slots = await scrapeVenue(venue, date);
-      allSlots.push(...slots);
+      console.log(`✅ ${venue.slug}: ${slots.length} slots`);
+      return { venue: venue.slug, slots };
+    })
+  );
 
-      // Random delay between venues (skip after last venue)
-      if (i < VENUES.length - 1) {
-        const delay = Math.random() * (delayMax - delayMin) + delayMin;
-        console.log(
-          `⏳ Waiting ${Math.round(delay / 1000)}s before next venue...`
-        );
-        await randomDelay(delayMin, delayMax);
-      }
-    } catch (error) {
-      console.error(`Error scraping ${venue.slug}:`, error);
+  const allSlots: ScrapedSlot[] = [];
+  let successCount = 0;
+
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      allSlots.push(...result.value.slots);
+      successCount++;
+    } else {
+      console.error(`❌ Scrape failed:`, result.reason);
     }
   }
 
-  // Log proxy stats at the end
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`📊 Done: ${successCount}/${VENUES.length} venues, ${allSlots.length} slots in ${duration}s`);
+
   const stats = proxyManager.getStats();
   if (stats.configured) {
-    console.log(`📊 Proxy stats: ${stats.totalSessions} sessions, ${stats.totalRequests} requests`);
+    console.log(`📊 Proxy: ${stats.totalRequests} requests`);
   }
 
   return allSlots;
