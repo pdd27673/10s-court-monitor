@@ -39,7 +39,7 @@ export async function scrapeAllVenues(date: string): Promise<ScrapedSlot[]> {
   // Log proxy stats at the end
   const stats = proxyManager.getStats();
   if (stats.configured) {
-    console.log(`📊 Proxy stats: ${stats.totalRequests} requests made`);
+    console.log(`📊 Proxy stats: ${stats.totalSessions} sessions, ${stats.totalRequests} requests`);
   }
 
   return allSlots;
