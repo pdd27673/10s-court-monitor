@@ -1,4 +1,6 @@
 import * as cheerio from "cheerio";
+import UserAgent from "user-agents";
+import { proxyManager } from "../proxy-manager";
 import { ScrapedSlot } from "./types";
 
 export async function scrapeCourtside(
@@ -7,18 +9,56 @@ export async function scrapeCourtside(
 ): Promise<ScrapedSlot[]> {
   const url = `https://tennistowerhamlets.com/book/courts/${venueSlug}/${date}`;
 
-  const response = await fetch(url, {
+  // Generate random desktop user agent
+  const userAgent = new UserAgent({ deviceCategory: "desktop" });
+
+  // Get rotating proxy agent (new residential IP per request)
+  const agent = proxyManager.getAgent();
+
+  const fetchOptions: RequestInit & { agent?: unknown } = {
+    agent,
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; TennisNotifier/1.0)",
-      Accept: "text/html",
+      "User-Agent": userAgent.toString(),
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-GB,en;q=0.9,en-US;q=0.8",
+      "Accept-Encoding": "gzip, deflate, br",
+      DNT: "1",
+      Connection: "keep-alive",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1",
+      "Cache-Control": "max-age=0",
     },
-  });
+  };
+
+  console.log(
+    `🔍 Fetching ${venueSlug} for ${date} ${agent ? "via rotating proxy" : "direct"}`
+  );
+
+  const response = await fetch(url, fetchOptions as RequestInit);
 
   if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status}`);
+    throw new Error(
+      `HTTP ${response.status}: ${response.statusText} for ${url}`
+    );
   }
 
   const html = await response.text();
+
+  // Verify we got actual HTML (not a block page)
+  if (
+    html.includes("Access Denied") ||
+    html.includes("403 Forbidden") ||
+    html.length < 100
+  ) {
+    throw new Error(`Blocked or empty response for ${venueSlug}`);
+  }
+
+  console.log(`✅ Successfully fetched ${venueSlug} (${html.length} bytes)`);
+
   const $ = cheerio.load(html);
   const slots: ScrapedSlot[] = [];
 
@@ -32,12 +72,17 @@ export async function scrapeCourtside(
     $(row)
       .find("label.court")
       .each((_, courtLabel) => {
-        const checkbox = $(courtLabel).find('input[type="checkbox"]');
         const button = $(courtLabel).find("span.button");
         const priceSpan = $(courtLabel).find("span.price");
 
         // Extract court name (e.g., "Court 1", "Court 2")
-        const buttonText = button.clone().children().remove().end().text().trim();
+        const buttonText = button
+          .clone()
+          .children()
+          .remove()
+          .end()
+          .text()
+          .trim();
         const court = buttonText || "Unknown";
 
         // Determine status from button class

@@ -19,13 +19,16 @@
     "@auth/drizzle-adapter": "^1.11.1",
     "better-sqlite3": "^12.6.2",
     "cheerio": "^1.1.2",
+    "dotenv": "^17.2.4",
     "drizzle-orm": "^0.45.1",
+    "https-proxy-agent": "^7.0.6",
     "jose": "^6.1.3",
     "next": "16.1.4",
     "next-auth": "^5.0.0-beta.30",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "resend": "^6.8.0"
+    "resend": "^6.8.0",
+    "user-agents": "^1.1.669"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -33,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/user-agents": "^1.0.4",
     "drizzle-kit": "^0.31.8",
     "eslint": "^9",
     "eslint-config-next": "16.1.4",
