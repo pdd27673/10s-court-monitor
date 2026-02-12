@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
-import { getNextNDays } from "@/lib/scraper";
-import { scrapeVenue } from "@/lib/scrapers";
-import { VENUES } from "@/lib/constants";
+import { getNextNDays, runFullScrape } from "@/lib/scraper";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
-import { notifyUsers } from "@/lib/notifiers";
-import type { ScrapedSlot } from "@/lib/scraper";
+import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
 import { db } from "@/lib/db";
 import { slots, notificationLog } from "@/lib/schema";
 import { lt, sql } from "drizzle-orm";
@@ -46,24 +43,18 @@ async function runScrapeJob() {
     // Ensure all venues exist in DB
     await ensureVenuesExist();
 
-    // Get next 7 days
-    const dates = getNextNDays(8);
-    const allSlots: ScrapedSlot[] = [];
+    // Get next N days (configurable via SCRAPE_DAYS env var, default 8)
+    const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "8", 10);
+    const dates = getNextNDays(scrapeDays);
 
-    // Scrape all venues for all dates
-    for (const venue of VENUES) {
-      for (const date of dates) {
-        try {
-          console.log(`Scraping ${venue.slug} for ${date}...`);
-          const slotsData = await scrapeVenue(venue, date);
-          allSlots.push(...slotsData);
-        } catch (error) {
-          console.error(`Error scraping ${venue.slug} ${date}:`, error);
-        }
-      }
-    }
+    // Run full scrape with timing and stats
+    const { slots: allSlots, stats } = await runFullScrape(dates);
 
-    console.log(`Scraped ${allSlots.length} total slots`);
+    // Check for high failure rate and alert admin
+    await sendScrapeFailureAlert(stats);
+
+    // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
+    await sendScrapeSummary(stats);
 
     // Store slots and detect changes
     const changes = await storeAndDiff(allSlots);
