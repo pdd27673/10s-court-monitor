@@ -74,7 +74,6 @@ export async function scrapeClubSpark(
   const slots: ScrapedSlot[] = [];
 
   // Generate all possible time slots based on operating hours
-  const interval = data.MinimumInterval || 60;
   const startHour = Math.floor(data.EarliestStartTime / 60);
   const endHour = Math.floor(data.LatestEndTime / 60);
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { Suspense, useEffect, useState, Fragment } from "react";
+import { Suspense, useEffect, useState, Fragment, useCallback } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { VENUES, type Venue } from "@/lib/constants";
+import { VENUES } from "@/lib/constants";
 import { getBookingUrl } from "@/lib/utils/link-helpers";
 
 interface Slot {
@@ -40,17 +40,89 @@ interface Channel {
   active: boolean;
 }
 
-function getStatusColor(status: string) {
-  switch (status) {
-    case "available":
-      return "bg-green-500";
-    case "booked":
-      return "bg-red-400";
-    case "closed":
-      return "bg-gray-300";
-    default:
-      return "bg-gray-200";
-  }
+interface AdminStats {
+  totalUsers: number;
+  allowedUsers: number;
+  activeWatches: number;
+  totalWatches: number;
+  totalNotifications: number;
+  pendingRequests: number;
+  totalVenues: number;
+  totalSlots: number;
+  totalChannels: number;
+}
+
+interface AdminNotification {
+  id: number;
+  slotKey: string;
+  sentAt: string;
+}
+
+interface AdminUser {
+  id: number;
+  email: string;
+  name: string | null;
+  isAllowed: number;
+  isAdmin: number;
+  createdAt: string;
+  watchCount: number;
+  channelCount: number;
+}
+
+interface AdminUserDetails {
+  watches: Watch[];
+  channels: Channel[];
+}
+
+interface AdminVenue {
+  id: number;
+  slug: string;
+  name: string;
+  type?: string;
+  clubsparkHost?: string;
+  clubsparkId?: string;
+}
+
+interface VenueFormData {
+  name: string;
+  slug: string;
+  type: string;
+  clubsparkHost: string | null;
+  clubsparkId: string | null;
+}
+
+interface RegistrationRequest {
+  id: number;
+  email: string;
+  name: string | null;
+  reason: string | null;
+  status: string;
+  createdAt: string;
+  reviewedAt: string | null;
+}
+
+interface SystemLog {
+  id: number;
+  timestamp: string;
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+interface DbStats {
+  tables: {
+    users: number;
+    watches: number;
+    slots: number;
+    notificationLog: number;
+    venues: number;
+    channels: number;
+  };
+  databaseSize?: string;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function getNext7Days(): string[] {
@@ -276,9 +348,9 @@ function DashboardContent() {
   }, [selectedVenues, selectedDate, status, isGuest]);
 
   // Define fetch functions outside useEffect so they can be called from handlers
-  const fetchWatches = async () => {
+  const fetchWatches = useCallback(async () => {
     if (status !== "authenticated") return;
-    
+
     setLoadingWatches(true);
     try {
       const res = await fetch("/api/watches");
@@ -308,11 +380,11 @@ function DashboardContent() {
     } finally {
       setLoadingWatches(false);
     }
-  };
+  }, [status]);
 
-  const fetchChannels = async () => {
+  const fetchChannels = useCallback(async () => {
     if (status !== "authenticated") return;
-    
+
     setLoadingChannels(true);
     try {
       const res = await fetch("/api/channels");
@@ -325,7 +397,7 @@ function DashboardContent() {
     } finally {
       setLoadingChannels(false);
     }
-  };
+  }, [status]);
 
   // Check if user is admin
   useEffect(() => {
@@ -351,7 +423,7 @@ function DashboardContent() {
     if (status !== "authenticated") return;
     fetchWatches();
     fetchChannels();
-  }, [status]);
+  }, [status, fetchWatches, fetchChannels]);
 
   // Show message helper
   const showMessage = (type: "success" | "error", text: string) => {
@@ -380,8 +452,8 @@ function DashboardContent() {
       await fetchWatches();
       setShowWatchForm(false);
       showMessage("success", "Watch created successfully!");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to create watch");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -405,8 +477,8 @@ function DashboardContent() {
       await fetchWatches();
       setEditingWatch(null);
       showMessage("success", "Watch updated successfully!");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to update watch");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -425,8 +497,8 @@ function DashboardContent() {
 
       await fetchWatches();
       showMessage("success", "Watch deleted successfully!");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to delete watch");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -445,8 +517,8 @@ function DashboardContent() {
 
       await fetchWatches();
       showMessage("success", `Watch ${!currentActive ? "activated" : "paused"} successfully!`);
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to toggle watch");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -470,8 +542,8 @@ function DashboardContent() {
       await fetchChannels();
       setShowChannelForm(false);
       showMessage("success", "Channel added successfully!");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to create channel");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -494,8 +566,8 @@ function DashboardContent() {
       await fetchChannels();
       setEditingChannel(null);
       showMessage("success", "Channel updated successfully!");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to update channel");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -514,8 +586,8 @@ function DashboardContent() {
 
       await fetchChannels();
       showMessage("success", "Channel deleted successfully!");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to delete channel");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -534,8 +606,8 @@ function DashboardContent() {
 
       await fetchChannels();
       showMessage("success", `Channel ${!currentActive ? "activated" : "paused"} successfully!`);
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to toggle channel");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -1727,7 +1799,7 @@ function ChannelFormModal({
                       Click here to open @MvgMonitorBot
                     </a>
                   </li>
-                  <li>Send any message (like "/start" or "Hello")</li>
+                  <li>Send any message (like &quot;/start&quot; or &quot;Hello&quot;)</li>
                   <li>The bot will automatically reply with your Chat ID</li>
                   <li>Copy the number and paste it in the field above</li>
                 </ol>
@@ -1772,9 +1844,9 @@ function ChannelFormModal({
 }
 
 // Admin Components
-function AdminOverview({ setAdminSubTab, router }: { setAdminSubTab: (tab: "overview" | "users" | "requests" | "system" | "database") => void; router: any }) {
-  const [stats, setStats] = useState<any>(null);
-  const [recentNotifications, setRecentNotifications] = useState<any[]>([]);
+function AdminOverview({ setAdminSubTab, router }: { setAdminSubTab: (tab: "overview" | "users" | "requests" | "system" | "database") => void; router: ReturnType<typeof useRouter> }) {
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [recentNotifications, setRecentNotifications] = useState<AdminNotification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1853,7 +1925,7 @@ function AdminOverview({ setAdminSubTab, router }: { setAdminSubTab: (tab: "over
         <h2 className="text-lg font-semibold mb-4">Recent Notifications</h2>
         {recentNotifications.length > 0 ? (
           <div className="space-y-2">
-            {recentNotifications.map((notification: any) => (
+            {recentNotifications.map((notification) => (
               <div
                 key={notification.id}
                 className="flex items-center justify-between py-2 border-b dark:border-gray-700 last:border-0"
@@ -1874,12 +1946,12 @@ function AdminOverview({ setAdminSubTab, router }: { setAdminSubTab: (tab: "over
 }
 
 function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", text: string) => void }) {
-  const [users, setUsers] = useState<any[]>([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddUserForm, setShowAddUserForm] = useState(false);
   const [expandedUserId, setExpandedUserId] = useState<number | null>(null);
-  const [userDetails, setUserDetails] = useState<any>(null);
+  const [userDetails, setUserDetails] = useState<AdminUserDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   useEffect(() => {
@@ -1937,8 +2009,8 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
       await fetchUsers();
       setShowAddUserForm(false);
       showMessage("success", "User created successfully");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to create user");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -1964,7 +2036,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
 
       await fetchUsers();
       showMessage("success", "User status updated");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to update user");
     }
   };
@@ -1981,7 +2053,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
 
       await fetchUsers();
       showMessage("success", "Admin status updated");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to update user");
     }
   };
@@ -2000,7 +2072,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
 
       await fetchUsers();
       showMessage("success", "User deleted successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to delete user");
     }
   };
@@ -2142,7 +2214,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                               <h4 className="font-semibold text-sm mb-2">Watches ({userDetails.watches.length})</h4>
                               {userDetails.watches.length > 0 ? (
                                 <div className="space-y-2">
-                                  {userDetails.watches.map((watch: any) => (
+                                  {userDetails.watches.map((watch) => (
                                     <div key={watch.id} className="bg-white dark:bg-gray-800 rounded p-3 text-sm">
                                       <div className="flex justify-between items-start">
                                         <div>
@@ -2171,7 +2243,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                               <h4 className="font-semibold text-sm mb-2">Notification Channels ({userDetails.channels.length})</h4>
                               {userDetails.channels.length > 0 ? (
                                 <div className="space-y-2">
-                                  {userDetails.channels.map((channel: any) => (
+                                  {userDetails.channels.map((channel) => (
                                     <div key={channel.id} className="bg-white dark:bg-gray-800 rounded p-3 text-sm">
                                       <div className="flex justify-between items-center">
                                         <div>
@@ -2328,7 +2400,7 @@ function AddUserModal({
 }
 
 function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error", text: string) => void }) {
-  const [requests, setRequests] = useState<any[]>([]);
+  const [requests, setRequests] = useState<RegistrationRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
 
@@ -2362,7 +2434,7 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
 
       await fetchRequests();
       showMessage("success", `Approved ${email} - account created and welcome email sent`);
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to approve request");
     }
   };
@@ -2381,7 +2453,7 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
 
       await fetchRequests();
       showMessage("success", `Rejected ${email} - rejection email sent`);
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to reject request");
     }
   };
@@ -2398,7 +2470,7 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
 
       await fetchRequests();
       showMessage("success", "Request deleted");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to delete request");
     }
   };
@@ -2525,10 +2597,10 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
 function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error", text: string) => void }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [cleanupDays, setCleanupDays] = useState(7);
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [showVenueForm, setShowVenueForm] = useState(false);
-  const [venues, setVenues] = useState<any[]>([]);
+  const [venues, setVenues] = useState<AdminVenue[]>([]);
 
   useEffect(() => {
     fetchLogs();
@@ -2558,7 +2630,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
     }
   };
 
-  const handleAddVenue = async (venueData: any) => {
+  const handleAddVenue = async (venueData: VenueFormData) => {
     try {
       const res = await fetch("/api/admin/venues", {
         method: "POST",
@@ -2574,8 +2646,8 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
       await fetchVenues();
       setShowVenueForm(false);
       showMessage("success", "Venue added successfully");
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to add venue");
+    } catch (error) {
+      showMessage("error", getErrorMessage(error));
     }
   };
 
@@ -2593,7 +2665,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
 
       await fetchVenues();
       showMessage("success", "Venue deleted successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to delete venue");
     }
   };
@@ -2608,7 +2680,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
       if (!res.ok) throw new Error("Failed to start scrape");
 
       showMessage("success", "Scrape job started successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to start scrape");
     } finally {
       setLoading(null);
@@ -2634,7 +2706,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
         "success",
         `Cleanup completed: ${data.deletedSlots} slots, ${data.deletedLogs} logs deleted`
       );
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to run cleanup");
     } finally {
       setLoading(null);
@@ -2799,7 +2871,7 @@ function AddVenueModal({
   onSubmit,
 }: {
   onClose: () => void;
-  onSubmit: (venueData: any) => void;
+  onSubmit: (venueData: VenueFormData) => void;
 }) {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -2923,7 +2995,7 @@ function AddVenueModal({
 }
 
 function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error", text: string) => void }) {
-  const [dbStats, setDbStats] = useState<any>(null);
+  const [dbStats, setDbStats] = useState<DbStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
@@ -2961,7 +3033,7 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
       window.URL.revokeObjectURL(url);
 
       showMessage("success", "Database exported successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to export database");
     } finally {
       setExporting(false);
@@ -2982,7 +3054,7 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
 
       await fetchDbStats();
       showMessage("success", "Database vacuumed successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to vacuum database");
     }
   };
