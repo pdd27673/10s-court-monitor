@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { getNextNDays, runFullScrape } from "@/lib/scraper";
+import { runScheduledScrape } from "@/lib/scrape-scheduler";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
 import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
 import { db } from "@/lib/db";
 import { slots, notificationLog } from "@/lib/schema";
 import { lt, sql } from "drizzle-orm";
+import { proxyManager, formatBytes } from "@/lib/proxy-manager";
+import type { ScrapeStats } from "@/lib/scraper";
 
 // Protect the cron endpoint with a secret (skip in development)
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -38,31 +40,60 @@ async function runCleanup() {
 
 async function runScrapeJob() {
   try {
-    console.log("Starting scrape job...");
+    console.log("Starting scheduled scrape job...");
 
     // Ensure all venues exist in DB
     await ensureVenuesExist();
 
-    // Get next N days (configurable via SCRAPE_DAYS env var, default 8)
+    // Reset proxy stats for this run
+    proxyManager.resetStats();
+    const startTime = Date.now();
+
+    // Get configured days ahead (default 8)
     const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "8", 10);
-    const dates = getNextNDays(scrapeDays);
 
-    // Run full scrape with timing and stats
-    const { slots: allSlots, stats } = await runFullScrape(dates);
+    // Run scheduled scrape (only scrapes targets that are due)
+    const { slots: allSlots, targetsScraped, targetsSkipped, errors } = await runScheduledScrape(scrapeDays);
 
-    // Check for high failure rate and alert admin
-    await sendScrapeFailureAlert(stats);
+    // Build stats for alerting/summary
+    const durationMs = Date.now() - startTime;
+    const proxyStats = proxyManager.getStats();
+    const stats: ScrapeStats = {
+      durationMs,
+      durationFormatted: `${(durationMs / 1000).toFixed(1)}s`,
+      totalRequests: proxyStats.totalRequests,
+      totalBytes: proxyStats.totalBytes,
+      totalBytesFormatted: formatBytes(proxyStats.totalBytes),
+      venuesTotal: targetsScraped + targetsSkipped,
+      venuesSuccess: targetsScraped - errors.length,
+      venuesFailed: errors.length,
+      datesScraped: scrapeDays,
+      slotsScraped: allSlots.length,
+      failedVenues: errors,
+    };
 
-    // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
-    await sendScrapeSummary(stats);
+    console.log(`📊 Scrape completed in ${stats.durationFormatted}`);
+    console.log(`   ${targetsScraped} targets scraped, ${targetsSkipped} skipped (not due)`);
+    console.log(`   ${allSlots.length} slots fetched, ${stats.totalBytesFormatted} transferred`);
 
-    // Store slots and detect changes
-    const changes = await storeAndDiff(allSlots);
-    console.log(`Detected ${changes.length} newly available slots`);
+    // Only send alerts/summaries if we actually scraped something
+    if (targetsScraped > 0) {
+      // Check for high failure rate and alert admin
+      await sendScrapeFailureAlert(stats);
 
-    // Notify users about changes
-    if (changes.length > 0) {
-      await notifyUsers(changes);
+      // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
+      await sendScrapeSummary(stats);
+
+      // Store slots and detect changes
+      const changes = await storeAndDiff(allSlots);
+      console.log(`Detected ${changes.length} newly available slots`);
+
+      // Notify users about changes
+      if (changes.length > 0) {
+        await notifyUsers(changes);
+      }
+    } else {
+      console.log("No targets were due for scraping");
     }
 
     // Run cleanup after scraping

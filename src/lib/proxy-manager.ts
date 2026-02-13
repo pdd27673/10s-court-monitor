@@ -89,6 +89,9 @@ class ProxyManager {
   }
 
   getStats() {
+    if (!this.initialized) {
+      this.initialize();
+    }
     return {
       configured: !!(this.host && this.username && this.password),
       initialized: this.initialized,
