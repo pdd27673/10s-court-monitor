@@ -47,7 +47,7 @@ export default function UsersManagement() {
 
       await fetchUsers();
       showMessage("success", "User status updated");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to update user");
     }
   };
@@ -64,7 +64,7 @@ export default function UsersManagement() {
 
       await fetchUsers();
       showMessage("success", "Admin status updated");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to update user");
     }
   };
@@ -83,7 +83,7 @@ export default function UsersManagement() {
 
       await fetchUsers();
       showMessage("success", "User deleted successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to delete user");
     }
   };

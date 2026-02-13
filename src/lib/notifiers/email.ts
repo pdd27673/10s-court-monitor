@@ -1,6 +1,13 @@
 import { Resend } from "resend";
 import { SlotChange } from "../differ";
 import { getBookingUrl } from "../utils/link-helpers";
+import type { ScrapeStats } from "../scraper";
+
+// Admin email for scrape alerts
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+
+// Alert threshold: if failure rate exceeds this percentage, send alert
+const FAILURE_ALERT_THRESHOLD = parseFloat(process.env.SCRAPE_FAILURE_THRESHOLD || "20");
 
 // Resend client for HTTP-based email
 const resend = process.env.RESEND_API_KEY
@@ -135,4 +142,124 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
   `;
 
   return { subject, html };
+}
+
+/**
+ * Send admin alert when scrape failures exceed threshold.
+ * Requires ADMIN_EMAIL env var to be set.
+ */
+export async function sendScrapeFailureAlert(stats: ScrapeStats): Promise<boolean> {
+  if (!resend || !ADMIN_EMAIL) {
+    if (!ADMIN_EMAIL) {
+      console.warn("Admin alerting not configured (missing ADMIN_EMAIL)");
+    }
+    return false;
+  }
+
+  const totalTasks = stats.venuesSuccess + stats.venuesFailed;
+  const failureRate = totalTasks > 0 ? (stats.venuesFailed / totalTasks) * 100 : 0;
+
+  // Only alert if failure rate exceeds threshold
+  if (failureRate < FAILURE_ALERT_THRESHOLD) {
+    return false;
+  }
+
+  const subject = `⚠️ Scrape Alert: ${failureRate.toFixed(0)}% Failure Rate`;
+
+  let html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+        <h1 style="color: #dc2626; font-size: 24px; margin: 0 0 16px 0;">⚠️ Scrape Alert: High Failure Rate</h1>
+
+        <div style="background: white; padding: 16px; border-radius: 8px; margin-bottom: 16px;">
+          <h3 style="margin: 0 0 12px 0; color: #374151;">📊 Stats</h3>
+          <ul style="margin: 0; padding-left: 20px; color: #4b5563;">
+            <li>Duration: <strong>${stats.durationFormatted}</strong></li>
+            <li>Data transferred: <strong>${stats.totalBytesFormatted}</strong></li>
+            <li>Success: <strong style="color: #16a34a;">${stats.venuesSuccess}/${totalTasks}</strong> (${(100 - failureRate).toFixed(1)}%)</li>
+            <li>Failed: <strong style="color: #dc2626;">${stats.venuesFailed}/${totalTasks}</strong> (${failureRate.toFixed(1)}%)</li>
+          </ul>
+        </div>
+  `;
+
+  if (stats.failedVenues.length > 0) {
+    html += `
+        <div style="background: white; padding: 16px; border-radius: 8px;">
+          <h3 style="margin: 0 0 12px 0; color: #374151;">❌ Failed Venues</h3>
+          <ul style="margin: 0; padding-left: 20px; color: #4b5563; font-family: monospace; font-size: 13px;">
+    `;
+    const maxToShow = 15;
+    for (const venue of stats.failedVenues.slice(0, maxToShow)) {
+      html += `<li style="margin: 4px 0;">${venue}</li>`;
+    }
+    if (stats.failedVenues.length > maxToShow) {
+      html += `<li style="margin: 4px 0; color: #9ca3af;">... and ${stats.failedVenues.length - maxToShow} more</li>`;
+    }
+    html += `
+          </ul>
+        </div>
+    `;
+  }
+
+  html += `
+      </div>
+      <p style="color: #6b7280; font-size: 13px; text-align: center;">
+        🔧 Check server logs for detailed error messages.
+      </p>
+    </div>
+  `;
+
+  try {
+    await sendEmail(ADMIN_EMAIL, subject, html);
+    console.log(`🚨 Admin alert sent: ${failureRate.toFixed(1)}% failure rate`);
+    return true;
+  } catch (error) {
+    console.error("Failed to send admin alert:", error);
+    return false;
+  }
+}
+
+/**
+ * Send a scrape summary to admin (optional, for monitoring).
+ */
+export async function sendScrapeSummary(stats: ScrapeStats): Promise<boolean> {
+  if (!resend || !ADMIN_EMAIL) {
+    return false;
+  }
+
+  // Only send summary if LOG_SCRAPE_SUMMARY is enabled
+  if (process.env.LOG_SCRAPE_SUMMARY !== "true") {
+    return false;
+  }
+
+  const totalTasks = stats.venuesSuccess + stats.venuesFailed;
+  const successRate = totalTasks > 0 ? (stats.venuesSuccess / totalTasks) * 100 : 0;
+
+  const subject = `📊 Scrape Summary: ${stats.slotsScraped} slots in ${stats.durationFormatted}`;
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px;">
+        <h1 style="color: #16a34a; font-size: 24px; margin: 0 0 16px 0;">📊 Scrape Summary</h1>
+
+        <div style="background: white; padding: 16px; border-radius: 8px;">
+          <ul style="margin: 0; padding-left: 20px; color: #4b5563;">
+            <li>⏱ Duration: <strong>${stats.durationFormatted}</strong></li>
+            <li>📦 Data: <strong>${stats.totalBytesFormatted}</strong> (${stats.totalRequests} requests)</li>
+            <li>✅ Success: <strong>${stats.venuesSuccess}/${totalTasks}</strong> (${successRate.toFixed(0)}%)</li>
+            <li>🎾 Slots: <strong>${stats.slotsScraped}</strong></li>
+            ${stats.venuesFailed > 0 ? `<li>⚠️ Failures: <strong style="color: #dc2626;">${stats.venuesFailed}</strong></li>` : ""}
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+
+  try {
+    await sendEmail(ADMIN_EMAIL, subject, html);
+    return true;
+  } catch (error) {
+    console.error("Failed to send scrape summary:", error);
+    return false;
+  }
 }
