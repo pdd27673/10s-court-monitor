@@ -38,15 +38,37 @@ export async function PUT(
     }
 
     if (action === "approve") {
-      // Create user account
-      const [newUser] = await db
-        .insert(users)
-        .values({
-          email: regRequest.email,
-          name: regRequest.name,
-          isAllowed: 1,
-        })
-        .returning();
+      // Check if user already exists (might have tried to log in before approval)
+      const existingUser = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, regRequest.email))
+        .limit(1);
+
+      let user;
+      if (existingUser.length > 0) {
+        // User exists, update their allowlist status
+        const [updatedUser] = await db
+          .update(users)
+          .set({
+            isAllowed: 1,
+            name: regRequest.name || existingUser[0].name,
+          })
+          .where(eq(users.email, regRequest.email))
+          .returning();
+        user = updatedUser;
+      } else {
+        // User doesn't exist, create new account
+        const [newUser] = await db
+          .insert(users)
+          .values({
+            email: regRequest.email,
+            name: regRequest.name,
+            isAllowed: 1,
+          })
+          .returning();
+        user = newUser;
+      }
 
       // Update request status
       await db
@@ -85,7 +107,7 @@ export async function PUT(
         console.error("Failed to send welcome email:", emailError);
       }
 
-      return NextResponse.json({ success: true, user: newUser });
+      return NextResponse.json({ success: true, user });
     } else if (action === "reject") {
       // Update request status
       await db

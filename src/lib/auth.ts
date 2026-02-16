@@ -110,21 +110,10 @@ const customAdapter: Adapter = {
   },
 
   async createUser(data) {
-    const result = await db.insert(users).values({
-      email: data.email,
-      name: data.name ?? null,
-      emailVerified: data.emailVerified?.toISOString() ?? null,
-      image: data.image ?? null,
-      isAllowed: 0, // New users not allowed by default
-    }).returning();
-    const newUser = result[0];
-    return {
-      id: String(newUser.id),
-      email: newUser.email,
-      emailVerified: newUser.emailVerified ? new Date(newUser.emailVerified) : null,
-      name: newUser.name,
-      image: newUser.image,
-    };
+    // Don't auto-create users - they should only be created through registration approval
+    // This prevents "zombie" accounts for unapproved users
+    // If we reach this point, the user was already checked in getUserByEmail and exists
+    throw new Error("User creation should only happen through registration approval");
   },
 
   async getUser(id) {
@@ -221,16 +210,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signIn({ user, email }) {
       if (!user.email) return false;
 
-      // For email provider: check allowlist before sending the magic link
-      // email.verificationRequest is true when requesting the link, false when clicking it
-      if (email?.verificationRequest) {
-        const dbUser = await db.query.users.findFirst({
-          where: eq(users.email, user.email),
-        });
-        // Only send magic link to users who exist AND are allowed
-        if (!dbUser || !dbUser.isAllowed) {
-          return false;
-        }
+      // Check if user exists and is allowed
+      const dbUser = await db.query.users.findFirst({
+        where: eq(users.email, user.email),
+      });
+
+      // Only allow sign in if user exists AND is allowlisted
+      // This prevents auto-creation of user accounts for unapproved users
+      if (!dbUser || !dbUser.isAllowed) {
+        return false;
       }
 
       return true;
