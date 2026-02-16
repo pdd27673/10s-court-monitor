@@ -15,11 +15,6 @@ export interface SlotChange {
   price?: string;
 }
 
-// Create a unique key for a slot
-function slotKey(slot: { venue: string; date: string; time: string; court: string }): string {
-  return `${slot.venue}:${slot.date}:${slot.time}:${slot.court}`;
-}
-
 // Ensure all venues exist in the database
 export async function ensureVenuesExist() {
   for (const venue of VENUES) {

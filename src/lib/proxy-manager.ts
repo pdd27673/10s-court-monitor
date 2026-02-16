@@ -1,6 +1,12 @@
 import { HttpsProxyAgent } from "https-proxy-agent";
 import got from "got";
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 class ProxyManager {
   private host: string | null = null;
   private port: string | null = null;
@@ -8,6 +14,7 @@ class ProxyManager {
   private password: string | null = null;
   private requestCount = 0;
   private sessionCount = 0;
+  private totalBytes = 0;
   private initialized = false;
 
   initialize() {
@@ -71,12 +78,26 @@ class ProxyManager {
     };
   }
 
+  trackBytes(bytes: number) {
+    this.totalBytes += bytes;
+  }
+
+  resetStats() {
+    this.requestCount = 0;
+    this.sessionCount = 0;
+    this.totalBytes = 0;
+  }
+
   getStats() {
+    if (!this.initialized) {
+      this.initialize();
+    }
     return {
       configured: !!(this.host && this.username && this.password),
       initialized: this.initialized,
       totalRequests: this.requestCount,
       totalSessions: this.sessionCount,
+      totalBytes: this.totalBytes,
     };
   }
 
@@ -150,6 +171,9 @@ export async function proxyFetch(
     retry: { limit: 0 },
     agent: options.agent ? { https: options.agent, http: options.agent } : undefined,
   });
+
+  // Track bytes for bandwidth monitoring
+  proxyManager.trackBytes(response.body.length);
 
   return {
     ok: response.statusCode >= 200 && response.statusCode < 300,

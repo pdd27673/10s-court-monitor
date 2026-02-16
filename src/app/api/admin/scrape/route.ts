@@ -3,12 +3,9 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getNextNDays } from "@/lib/scraper";
-import { scrapeVenue } from "@/lib/scrapers";
-import { VENUES } from "@/lib/constants";
+import { getNextNDays, runFullScrape } from "@/lib/scraper";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
-import { notifyUsers } from "@/lib/notifiers";
-import type { ScrapedSlot } from "@/lib/scraper";
+import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
 
 export async function POST() {
   try {
@@ -28,24 +25,27 @@ export async function POST() {
     (async () => {
       try {
         await ensureVenuesExist();
-        const dates = getNextNDays(8);
-        const allSlots: ScrapedSlot[] = [];
 
-        for (const venue of VENUES) {
-          for (const date of dates) {
-            try {
-              const slotsData = await scrapeVenue(venue, date);
-              allSlots.push(...slotsData);
-            } catch (error) {
-              console.error(`Error scraping ${venue.slug} ${date}:`, error);
-            }
-          }
-        }
+        // Get next N days (configurable via SCRAPE_DAYS env var, default 8)
+        const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "8", 10);
+        const dates = getNextNDays(scrapeDays);
 
+        // Run full scrape with timing and stats
+        const { slots: allSlots, stats } = await runFullScrape(dates);
+
+        // Check for high failure rate and alert admin
+        await sendScrapeFailureAlert(stats);
+
+        // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
+        await sendScrapeSummary(stats);
+
+        // Store slots and detect changes
         const changes = await storeAndDiff(allSlots);
         if (changes.length > 0) {
           await notifyUsers(changes);
         }
+
+        console.log("Manual scrape completed successfully");
       } catch (error) {
         console.error("Manual scrape failed:", error);
       }

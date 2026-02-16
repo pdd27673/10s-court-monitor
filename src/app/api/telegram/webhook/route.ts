@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { sendTelegramMessage } from "@/lib/notifiers/telegram";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // POST /api/telegram/webhook - Handle incoming Telegram bot messages
 export async function POST(request: Request) {
@@ -16,7 +15,6 @@ export async function POST(request: Request) {
     // Handle message updates
     if (update.message) {
       const chatId = update.message.chat.id;
-      const messageText = update.message.text || "";
       const firstName = update.message.chat.first_name || "there";
 
       // Respond with chat ID

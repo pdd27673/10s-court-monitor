@@ -2,8 +2,10 @@ import { db } from "../db";
 import { notificationChannels, notificationLog, watches } from "../schema";
 import { SlotChange } from "../differ";
 import { sendTelegramMessage, formatSlotChangesForTelegram } from "./telegram";
-import { sendEmail, formatSlotChangesForEmail } from "./email";
+import { sendEmail, formatSlotChangesForEmail, sendScrapeFailureAlert, sendScrapeSummary } from "./email";
 import { eq, and } from "drizzle-orm";
+
+export { sendScrapeFailureAlert, sendScrapeSummary };
 
 // Check if a slot matches a user's watch preferences
 function matchesWatch(

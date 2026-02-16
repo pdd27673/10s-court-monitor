@@ -38,10 +38,10 @@ export default function RegisterPage() {
         text: data.message || "Your request has been submitted successfully!",
       });
       setSubmitted(true);
-    } catch (error: any) {
+    } catch (error) {
       setMessage({
         type: "error",
-        text: error.message || "An error occurred. Please try again.",
+        text: error instanceof Error ? error.message : "An error occurred. Please try again.",
       });
     } finally {
       setLoading(false);
