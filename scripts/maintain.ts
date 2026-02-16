@@ -14,6 +14,7 @@
  *   edit-user       Edit an existing user's preferences (interactive)
  *   allow-user      Add email to allowlist (can log into dashboard)
  *   set-admin       Make a user an admin
+ *   normalize-emails Convert all emails to lowercase (for case-insensitive auth)
  *   delete-user     Delete a user and all their data
  *   cleanup         Clean up old data (slots, logs)
  *   test-notify     Send a test notification to a user
@@ -659,6 +660,32 @@ async function setAdmin() {
   }
 }
 
+async function normalizeEmails() {
+  header("Normalize Emails");
+  
+  log("Converting all emails to lowercase for case-insensitive auth...\n", "cyan");
+
+  // Normalize users table
+  const allUsers = await db.select().from(users);
+  let usersUpdated = 0;
+  
+  for (const user of allUsers) {
+    const normalizedEmail = user.email.toLowerCase();
+    if (user.email !== normalizedEmail) {
+      await db
+        .update(users)
+        .set({ email: normalizedEmail })
+        .where(eq(users.id, user.id));
+      log(`✓ Updated user: ${user.email} → ${normalizedEmail}`, "green");
+      usersUpdated++;
+    }
+  }
+
+  console.log();
+  log(`✓ Users: ${usersUpdated} updated, ${allUsers.length - usersUpdated} already lowercase`, "green");
+  log("All emails normalized! Users can now log in with any case variation.", "bright");
+}
+
 async function deleteUser() {
   header("Delete User");
 
@@ -951,6 +978,7 @@ ${colors.cyan}Commands:${colors.reset}
   edit-user                   Edit an existing user's preferences
   allow-user <email>          Add email to allowlist for dashboard login
   set-admin <email>           Make a user an admin (can access /admin)
+  normalize-emails            Convert all emails to lowercase (case-insensitive auth)
   delete-user <email-or-id>   Delete a user and all their data
   cleanup [days]              Remove data older than N days (default: 14)
   test-notify <user-id>       Send test notification to a user
@@ -993,6 +1021,9 @@ async function main() {
       break;
     case "set-admin":
       await setAdmin();
+      break;
+    case "normalize-emails":
+      await normalizeEmails();
       break;
     case "delete-user":
       await deleteUser();

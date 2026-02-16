@@ -12,6 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:sync": "tsx scripts/db-migrate.ts --push",
+    "db:normalize-emails": "tsx scripts/normalize-emails.ts",
+    "db:migrate-watches": "tsx scripts/migrate-watches-to-days.ts",
     "maintain": "tsx scripts/maintain.ts"
   },
   "dependencies": {

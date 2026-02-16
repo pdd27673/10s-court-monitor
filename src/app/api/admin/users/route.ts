@@ -13,7 +13,7 @@ export async function GET() {
     }
 
     // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!user[0] || !user[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -37,8 +37,10 @@ export const watches = sqliteTable("watches", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").references(() => users.id),
   venueId: integer("venue_id").references(() => venues.id), // null = all venues
-  weekdayTimes: text("weekday_times"), // JSON array like ["16:00","17:00","18:00"]
-  weekendTimes: text("weekend_times"), // JSON array like ["11:00","12:00","13:00"]
+  dayTimes: text("day_times"), // JSON object like {"monday":["7pm","8pm"],"tuesday":[],...}
+  // Legacy fields for migration compatibility
+  weekdayTimes: text("weekday_times"), // DEPRECATED: use dayTimes
+  weekendTimes: text("weekend_times"), // DEPRECATED: use dayTimes
   active: integer("active").default(1),
 });
 

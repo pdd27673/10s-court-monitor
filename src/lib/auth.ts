@@ -132,7 +132,7 @@ const customAdapter: Adapter = {
 
   async getUserByEmail(email) {
     const dbUser = await db.query.users.findFirst({
-      where: eq(users.email, email),
+      where: eq(users.email, email.toLowerCase()),
     });
     if (!dbUser) return null;
     return {
@@ -210,9 +210,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async signIn({ user, email }) {
       if (!user.email) return false;
 
-      // Check if user exists and is allowed
+      // Check if user exists and is allowed (normalize email to lowercase)
       const dbUser = await db.query.users.findFirst({
-        where: eq(users.email, user.email),
+        where: eq(users.email, user.email.toLowerCase()),
       });
 
       // Only allow sign in if user exists AND is allowlisted
@@ -226,7 +226,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async jwt({ token, user }) {
       if (user?.email) {
         const dbUser = await db.query.users.findFirst({
-          where: eq(users.email, user.email),
+          where: eq(users.email, user.email.toLowerCase()),
         });
         if (dbUser) {
           token.userId = dbUser.id;

@@ -56,8 +56,11 @@ export async function POST(request: Request) {
       );
     }
 
+    // Normalize email to lowercase for case-insensitive comparison
+    const normalizedEmail = email.toLowerCase();
+
     // Check if user already exists
-    const existingUser = await db.select().from(users).where(eq(users.email, email));
+    const existingUser = await db.select().from(users).where(eq(users.email, normalizedEmail));
     if (existingUser.length > 0) {
       return NextResponse.json(
         { error: "An account with this email already exists" },
@@ -69,7 +72,7 @@ export async function POST(request: Request) {
     const existingRequest = await db
       .select()
       .from(registrationRequests)
-      .where(eq(registrationRequests.email, email));
+      .where(eq(registrationRequests.email, normalizedEmail));
 
     const pendingRequest = existingRequest.find((r) => r.status === "pending");
     if (pendingRequest) {
@@ -83,7 +86,7 @@ export async function POST(request: Request) {
     const [newRequest] = await db
       .insert(registrationRequests)
       .values({
-        email,
+        email: normalizedEmail,
         name: name || null,
         reason: reason.trim(),
         status: "pending",
@@ -107,7 +110,7 @@ export async function POST(request: Request) {
             <h2>New Registration Request</h2>
             <p>A new user has requested access to Time for Tennis:</p>
             <ul>
-              <li><strong>Email:</strong> ${email}</li>
+              <li><strong>Email:</strong> ${normalizedEmail}</li>
               <li><strong>Name:</strong> ${name || "Not provided"}</li>
               <li><strong>Reason:</strong> ${reason}</li>
             </ul>

@@ -26,16 +26,30 @@ export async function GET() {
         });
       }
 
+      // Support both new dayTimes and legacy weekday/weekend fields
+      let dayTimes = null;
+      if (watch.dayTimes) {
+        dayTimes = JSON.parse(watch.dayTimes);
+      } else if (watch.weekdayTimes || watch.weekendTimes) {
+        // Convert legacy format to new format
+        const weekday = watch.weekdayTimes ? JSON.parse(watch.weekdayTimes) : [];
+        const weekend = watch.weekendTimes ? JSON.parse(watch.weekendTimes) : [];
+        dayTimes = {
+          monday: weekday,
+          tuesday: weekday,
+          wednesday: weekday,
+          thursday: weekday,
+          friday: weekday,
+          saturday: weekend,
+          sunday: weekend,
+        };
+      }
+
       return {
         id: watch.id,
         userId: watch.userId,
         venue: venue ? { slug: venue.slug, name: venue.name } : null,
-        weekdayTimes: watch.weekdayTimes
-          ? JSON.parse(watch.weekdayTimes)
-          : null,
-        weekendTimes: watch.weekendTimes
-          ? JSON.parse(watch.weekendTimes)
-          : null,
+        dayTimes,
         active: Boolean(watch.active),
       };
     })
@@ -53,7 +67,7 @@ export async function POST(request: Request) {
 
   const userId = parseInt(session.user.id);
   const body = await request.json();
-  const { venueSlug, weekdayTimes, weekendTimes } = body;
+  const { venueSlug, dayTimes } = body;
 
   // Get venue ID if provided
   let venueId = null;
@@ -69,8 +83,7 @@ export async function POST(request: Request) {
     .values({
       userId,
       venueId,
-      weekdayTimes: weekdayTimes ? JSON.stringify(weekdayTimes) : null,
-      weekendTimes: weekendTimes ? JSON.stringify(weekendTimes) : null,
+      dayTimes: dayTimes ? JSON.stringify(dayTimes) : null,
       active: 1,
     })
     .returning();
@@ -88,12 +101,7 @@ export async function POST(request: Request) {
       id: watch.id,
       userId: watch.userId,
       venue: venue ? { slug: venue.slug, name: venue.name } : null,
-      weekdayTimes: watch.weekdayTimes
-        ? JSON.parse(watch.weekdayTimes)
-        : null,
-      weekendTimes: watch.weekendTimes
-        ? JSON.parse(watch.weekendTimes)
-        : null,
+      dayTimes: watch.dayTimes ? JSON.parse(watch.dayTimes) : null,
       active: Boolean(watch.active),
     },
   });
