@@ -3,39 +3,49 @@ import { db } from "@/lib/db";
 import { notificationChannels } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { parseSessionUserId } from "@/lib/utils/fetch-helpers";
 
 // GET /api/channels - List user's notification channels
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userId = parseSessionUserId(session);
+    const channels = await db.query.notificationChannels.findMany({
+      where: eq(notificationChannels.userId, userId),
+    });
+
+    return NextResponse.json({
+      channels: channels.map((c) => ({
+        id: c.id,
+        type: c.type,
+        destination: c.destination,
+        active: Boolean(c.active),
+      })),
+    });
+  } catch (error: any) {
+    console.error("Error fetching channels:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to fetch channels" },
+      { status: 500 }
+    );
   }
-
-  const userId = parseInt(session.user.id);
-  const channels = await db.query.notificationChannels.findMany({
-    where: eq(notificationChannels.userId, userId),
-  });
-
-  return NextResponse.json({
-    channels: channels.map((c) => ({
-      id: c.id,
-      type: c.type,
-      destination: c.destination,
-      active: Boolean(c.active),
-    })),
-  });
 }
 
 // POST /api/channels - Create a new notification channel
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const userId = parseInt(session.user.id);
-  const body = await request.json();
-  const { type, destination } = body;
+    const userId = parseSessionUserId(session);
+    const body = await request.json();
+    const { type, destination } = body;
 
   if (!type || !destination) {
     return NextResponse.json(
@@ -79,13 +89,20 @@ export async function POST(request: Request) {
     })
     .returning();
 
-  // Filter response to only safe fields (same as GET endpoint)
-  return NextResponse.json({
-    channel: {
-      id: channel.id,
-      type: channel.type,
-      destination: channel.destination,
-      active: Boolean(channel.active),
-    },
-  });
+    // Filter response to only safe fields (same as GET endpoint)
+    return NextResponse.json({
+      channel: {
+        id: channel.id,
+        type: channel.type,
+        destination: channel.destination,
+        active: Boolean(channel.active),
+      },
+    });
+  } catch (error: any) {
+    console.error("Error creating channel:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to create channel" },
+      { status: 500 }
+    );
+  }
 }

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { users, registrationRequests } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { sendEmail } from "@/lib/notifiers/email";
+import { escapeHtml } from "@/lib/utils/html-escape";
 
 export async function PUT(
   request: Request,
@@ -90,7 +91,7 @@ export async function PUT(
           "Welcome to Time for Tennis!",
           `
             <h2>Your access has been approved!</h2>
-            <p>Welcome to Time for Tennis, ${regRequest.name || ""}!</p>
+            <p>Welcome to Time for Tennis${regRequest.name ? `, ${escapeHtml(regRequest.name)}` : ""}!</p>
             <p>Your registration request has been approved. You can now sign in and start using the service.</p>
             <p>
               <a href="${process.env.NEXTAUTH_URL}/login" style="display: inline-block; padding: 10px 20px; background-color: #16a34a; color: white; text-decoration: none; border-radius: 5px;">

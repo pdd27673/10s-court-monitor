@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { handleApiResponse } from "@/lib/utils/fetch-helpers";
 
 interface User {
   id: number;
@@ -26,10 +27,11 @@ export default function UsersManagement() {
   const fetchUsers = async () => {
     try {
       const res = await fetch("/api/admin/users");
-      const data = await res.json();
-      setUsers(data.users);
+      const data = await handleApiResponse(res);
+      setUsers(data.users || []);
     } catch (error) {
       console.error("Failed to fetch users:", error);
+      setUsers([]);
     } finally {
       setLoading(false);
     }

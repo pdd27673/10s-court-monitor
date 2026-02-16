@@ -20,7 +20,15 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const days = body.days || 7;
+    const days = body.days !== undefined ? body.days : 7;
+
+    // Validate days parameter
+    if (typeof days !== 'number' || days < 1 || days > 365) {
+      return NextResponse.json(
+        { error: "Invalid days parameter: must be a number between 1 and 365" },
+        { status: 400 }
+      );
+    }
 
     // Calculate cutoff date
     const cutoffDate = new Date();

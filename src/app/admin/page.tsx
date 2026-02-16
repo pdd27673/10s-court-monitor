@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { handleApiResponse } from "@/lib/utils/fetch-helpers";
 
 interface Stats {
   totalUsers: number;
@@ -33,11 +34,14 @@ export default function AdminDashboard() {
   const fetchStats = async () => {
     try {
       const res = await fetch("/api/admin/stats");
-      const data = await res.json();
+      const data = await handleApiResponse(res);
       setStats(data.stats);
       setRecentNotifications(data.recentNotifications);
     } catch (error) {
       console.error("Failed to fetch stats:", error);
+      // Set error state so user knows something went wrong
+      setStats(null);
+      setRecentNotifications([]);
     } finally {
       setLoading(false);
     }

@@ -202,10 +202,6 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const isGuest = searchParams.get("guest") === "true";
 
-  console.log("[Dashboard] searchParams:", searchParams.toString());
-  console.log("[Dashboard] isGuest:", isGuest);
-  console.log("[Dashboard] session status:", status);
-
   // Initialize from localStorage with validation
   const [selectedVenues, setSelectedVenues] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
@@ -584,15 +580,24 @@ function DashboardContent() {
     if (!confirm(`Are you sure you want to delete ${count} watch${count > 1 ? 'es' : ''}?`)) return;
 
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         Array.from(selectedWatchIds).map(id =>
           fetch(`/api/watches/${id}`, { method: "DELETE" })
         )
       );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
       await fetchWatches();
       setSelectedWatchIds(new Set());
       setSelectionMode(false);
-      showMessage("success", `Deleted ${count} watch${count > 1 ? 'es' : ''} successfully!`);
+
+      if (succeeded > 0) {
+        showMessage("success", `Deleted ${succeeded} watch${succeeded > 1 ? 'es' : ''} successfully${failed > 0 ? ` (${failed} failed)` : ''}!`);
+      } else {
+        showMessage("error", "Failed to delete watches");
+      }
     } catch (error: any) {
       showMessage("error", error.message || "Failed to delete watches");
     }
@@ -603,7 +608,7 @@ function DashboardContent() {
     const count = selectedWatchIds.size;
 
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         Array.from(selectedWatchIds).map(id =>
           fetch(`/api/watches/${id}`, {
             method: "PATCH",
@@ -612,9 +617,18 @@ function DashboardContent() {
           })
         )
       );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
       await fetchWatches();
       setSelectedWatchIds(new Set());
-      showMessage("success", `${activate ? 'Activated' : 'Paused'} ${count} watch${count > 1 ? 'es' : ''} successfully!`);
+
+      if (succeeded > 0) {
+        showMessage("success", `${activate ? 'Activated' : 'Paused'} ${succeeded} watch${succeeded > 1 ? 'es' : ''} successfully${failed > 0 ? ` (${failed} failed)` : ''}!`);
+      } else {
+        showMessage("error", `Failed to ${activate ? 'activate' : 'pause'} watches`);
+      }
     } catch (error: any) {
       showMessage("error", error.message || `Failed to ${activate ? 'activate' : 'pause'} watches`);
     }
@@ -631,7 +645,7 @@ function DashboardContent() {
   }) => {
     const count = selectedWatchIds.size;
     try {
-      await Promise.all(
+      const results = await Promise.allSettled(
         Array.from(selectedWatchIds).map(id =>
           fetch(`/api/watches/${id}`, {
             method: "PUT",
@@ -640,10 +654,19 @@ function DashboardContent() {
           })
         )
       );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
       await fetchWatches();
       setSelectedWatchIds(new Set());
       setBulkEditMode(false);
-      showMessage("success", `Updated ${count} watch${count > 1 ? 'es' : ''} successfully!`);
+
+      if (succeeded > 0) {
+        showMessage("success", `Updated ${succeeded} watch${succeeded > 1 ? 'es' : ''} successfully${failed > 0 ? ` (${failed} failed)` : ''}!`);
+      } else {
+        showMessage("error", "Failed to update watches");
+      }
     } catch (error: any) {
       showMessage("error", error.message || "Failed to update watches");
     }
@@ -4586,7 +4609,6 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
 }
 
 function SuspenseFallback() {
-  console.log("[Dashboard] Suspense fallback rendering");
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="text-gray-500">Loading...</div>
@@ -4595,8 +4617,6 @@ function SuspenseFallback() {
 }
 
 export default function Dashboard() {
-  console.log("[Dashboard] Wrapper rendering, window.location:", typeof window !== "undefined" ? window.location.href : "SSR");
-
   return (
     <Suspense fallback={<SuspenseFallback />}>
       <DashboardContent />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { handleApiResponse } from "@/lib/utils/fetch-helpers";
 
 interface RegistrationRequest {
   id: number;
@@ -25,10 +26,11 @@ export default function RegistrationRequests() {
   const fetchRequests = async () => {
     try {
       const res = await fetch("/api/admin/requests");
-      const data = await res.json();
-      setRequests(data.requests);
+      const data = await handleApiResponse(res);
+      setRequests(data.requests || []);
     } catch (error) {
       console.error("Failed to fetch requests:", error);
+      setRequests([]);
     } finally {
       setLoading(false);
     }
