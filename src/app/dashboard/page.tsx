@@ -598,14 +598,13 @@ function DashboardContent() {
       } else {
         showMessage("error", "Failed to delete watches");
       }
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to delete watches");
+    } catch (error) {
+      showMessage("error", error instanceof Error ? error.message : "Failed to delete watches");
     }
   };
 
   const handleBulkToggle = async (activate: boolean) => {
     if (selectedWatchIds.size === 0) return;
-    const count = selectedWatchIds.size;
 
     try {
       const results = await Promise.allSettled(
@@ -629,8 +628,8 @@ function DashboardContent() {
       } else {
         showMessage("error", `Failed to ${activate ? 'activate' : 'pause'} watches`);
       }
-    } catch (error: any) {
-      showMessage("error", error.message || `Failed to ${activate ? 'activate' : 'pause'} watches`);
+    } catch (error) {
+      showMessage("error", error instanceof Error ? error.message : `Failed to ${activate ? 'activate' : 'pause'} watches`);
     }
   };
 
@@ -643,7 +642,6 @@ function DashboardContent() {
     saturday: string[];
     sunday: string[];
   }) => {
-    const count = selectedWatchIds.size;
     try {
       const results = await Promise.allSettled(
         Array.from(selectedWatchIds).map(id =>
@@ -667,8 +665,8 @@ function DashboardContent() {
       } else {
         showMessage("error", "Failed to update watches");
       }
-    } catch (error: any) {
-      showMessage("error", error.message || "Failed to update watches");
+    } catch (error) {
+      showMessage("error", error instanceof Error ? error.message : "Failed to update watches");
     }
   };
 
@@ -1622,7 +1620,7 @@ function DashboardContent() {
                                                   if (selectionMode) {
                                                     toggleWatchSelection(watch.id);
                                                   } else {
-                                                    const { color, ...watchWithoutColor } = watch;
+                                                    const { color: _color, ...watchWithoutColor } = watch;
                                                     setEditingWatch(watchWithoutColor);
                                                   }
                                                 }}
@@ -1654,8 +1652,6 @@ function DashboardContent() {
                         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2">
                           {venueWatches.map((watch) => {
                             const isSelected = selectedWatchIds.has(watch.id);
-                            const activeDays = Object.entries(watch.dayTimes)
-                              .filter(([_, times]) => times.length > 0);
                             const totalTimeSlots = Object.values(watch.dayTimes)
                               .reduce((sum, times) => sum + times.length, 0);
 
@@ -1725,7 +1721,7 @@ function DashboardContent() {
                                   </button>
                                   <button
                                     onClick={() => {
-                                      const { color, ...watchWithoutColor } = watch;
+                                      const { color: _color, ...watchWithoutColor } = watch;
                                       setEditingWatch(watchWithoutColor);
                                     }}
                                     className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded font-medium transition-colors"
@@ -3656,13 +3652,13 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                                           <p className="font-medium">{watch.venueName || "All Venues"}</p>
                                           <div className="mt-2 space-y-1">
                                             {watch.dayTimes && Object.entries(watch.dayTimes)
-                                              .filter(([_, times]: [string, any]) => times?.length > 0)
-                                              .map(([day, times]: [string, any]) => (
+                                              .filter(([, times]: [string, string[]]) => times?.length > 0)
+                                              .map(([day, times]: [string, string[]]) => (
                                                 <p key={day} className="text-xs text-gray-500">
                                                   <span className="capitalize font-medium">{day}:</span> {times.join(", ")}
                                                 </p>
                                               ))}
-                                            {watch.dayTimes && Object.values(watch.dayTimes).every((times: any) => !times || times.length === 0) && (
+                                            {watch.dayTimes && Object.values(watch.dayTimes).every((times: string[]) => !times || times.length === 0) && (
                                               <p className="text-xs text-gray-500 italic">No times set</p>
                                             )}
                                           </div>

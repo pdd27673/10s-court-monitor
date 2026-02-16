@@ -26,10 +26,10 @@ export async function GET() {
         active: Boolean(c.active),
       })),
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error fetching channels:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to fetch channels" },
+      { error: error instanceof Error ? error.message : "Failed to fetch channels" },
       { status: 500 }
     );
   }
@@ -98,10 +98,10 @@ export async function POST(request: Request) {
         active: Boolean(channel.active),
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error creating channel:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to create channel" },
+      { error: error instanceof Error ? error.message : "Failed to create channel" },
       { status: 500 }
     );
   }
