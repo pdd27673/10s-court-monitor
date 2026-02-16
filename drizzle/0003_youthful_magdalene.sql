@@ -1,7 +1,7 @@
 -- Migration: Add dayTimes column and cascade deletes
--- This migration adds the day_times column to watches table and updates foreign keys with cascade delete
-
-PRAGMA foreign_keys=OFF;--> statement-breakpoint
+-- Note: PRAGMA foreign_keys cannot be changed inside a transaction (drizzle-kit wraps in a transaction).
+-- Solution: Drop child tables before parent tables to avoid FK constraint violations.
+-- notification_log (child) must be dropped before notification_channels (parent) can be dropped.
 
 -- Clean up orphaned data before migration to prevent foreign key violations
 DELETE FROM `notification_log` WHERE `user_id` NOT IN (SELECT `id` FROM `users`);--> statement-breakpoint
@@ -11,7 +11,11 @@ DELETE FROM `watches` WHERE `user_id` NOT IN (SELECT `id` FROM `users`);--> stat
 DELETE FROM `watches` WHERE `venue_id` IS NOT NULL AND `venue_id` NOT IN (SELECT `id` FROM `venues`);--> statement-breakpoint
 DELETE FROM `slots` WHERE `venue_id` NOT IN (SELECT `id` FROM `venues`);--> statement-breakpoint
 
--- Recreate notification_channels with cascade delete
+-- Save notification_log to temp table so we can drop it (removing FK dependency on notification_channels)
+CREATE TEMP TABLE `_tmp_notification_log` AS SELECT * FROM `notification_log`;--> statement-breakpoint
+DROP TABLE `notification_log`;--> statement-breakpoint
+
+-- Recreate notification_channels with cascade delete (safe now - no FK dependents)
 CREATE TABLE `__new_notification_channels` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer NOT NULL,
@@ -26,7 +30,7 @@ ALTER TABLE `__new_notification_channels` RENAME TO `notification_channels`;--> 
 CREATE INDEX `idx_channels_user_active` ON `notification_channels` (`user_id`,`active`);--> statement-breakpoint
 CREATE UNIQUE INDEX `notification_channels_user_id_type_destination_unique` ON `notification_channels` (`user_id`,`type`,`destination`);--> statement-breakpoint
 
--- Recreate notification_log with cascade delete
+-- Recreate notification_log with cascade delete (restore data from temp table)
 CREATE TABLE `__new_notification_log` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`user_id` integer NOT NULL,
@@ -36,8 +40,8 @@ CREATE TABLE `__new_notification_log` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`channel_id`) REFERENCES `notification_channels`(`id`) ON UPDATE no action ON DELETE cascade
 );--> statement-breakpoint
-INSERT INTO `__new_notification_log`("id", "user_id", "channel_id", "slot_key", "sent_at") SELECT "id", "user_id", "channel_id", "slot_key", "sent_at" FROM `notification_log`;--> statement-breakpoint
-DROP TABLE `notification_log`;--> statement-breakpoint
+INSERT INTO `__new_notification_log`("id", "user_id", "channel_id", "slot_key", "sent_at") SELECT "id", "user_id", "channel_id", "slot_key", "sent_at" FROM `_tmp_notification_log`;--> statement-breakpoint
+DROP TABLE `_tmp_notification_log`;--> statement-breakpoint
 ALTER TABLE `__new_notification_log` RENAME TO `notification_log`;--> statement-breakpoint
 CREATE INDEX `idx_log_channel_slot` ON `notification_log` (`channel_id`,`slot_key`);--> statement-breakpoint
 CREATE INDEX `idx_log_sent_at` ON `notification_log` (`sent_at`);--> statement-breakpoint
@@ -80,9 +84,6 @@ CREATE INDEX `idx_watches_user_active` ON `watches` (`user_id`,`active`);--> sta
 
 -- Create index on registration_requests
 CREATE INDEX IF NOT EXISTS `idx_requests_status` ON `registration_requests` (`status`);--> statement-breakpoint
-
--- Re-enable foreign keys
-PRAGMA foreign_keys=ON;--> statement-breakpoint
 
 -- Migrate existing watch data from weekday_times/weekend_times to day_times format
 -- Only for watches that have old format data but no day_times
