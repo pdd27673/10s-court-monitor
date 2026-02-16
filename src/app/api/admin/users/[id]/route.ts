@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { users, watches, notificationChannels, notificationLog } from "@/lib/schema";
+import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
 export async function PUT(
@@ -16,15 +16,28 @@ export async function PUT(
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const { id } = await params;
     const userId = parseInt(id, 10);
+
+    if (isNaN(userId)) {
+      return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
+    }
+
     const body = await request.json();
     const { name, isAllowed, isAdmin } = body;
+
+    // Prevent admin from demoting themselves
+    if (userId === adminUser[0].id && isAdmin === false) {
+      return NextResponse.json(
+        { error: "Cannot remove your own admin privileges" },
+        { status: 403 }
+      );
+    }
 
     // Update user
     const [updatedUser] = await db
@@ -60,7 +73,7 @@ export async function DELETE(
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -68,10 +81,19 @@ export async function DELETE(
     const { id } = await params;
     const userId = parseInt(id, 10);
 
-    // Delete user's data
-    await db.delete(notificationLog).where(eq(notificationLog.userId, userId));
-    await db.delete(notificationChannels).where(eq(notificationChannels.userId, userId));
-    await db.delete(watches).where(eq(watches.userId, userId));
+    if (isNaN(userId)) {
+      return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
+    }
+
+    // Prevent admin from deleting themselves
+    if (userId === adminUser[0].id) {
+      return NextResponse.json(
+        { error: "Cannot delete your own account" },
+        { status: 403 }
+      );
+    }
+
+    // Delete user's data (cascade deletes will handle related records due to schema)
     await db.delete(users).where(eq(users.id, userId));
 
     return NextResponse.json({ success: true });

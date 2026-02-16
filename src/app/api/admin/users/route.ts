@@ -13,7 +13,7 @@ export async function GET() {
     }
 
     // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!user[0] || !user[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -68,15 +68,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
 
+    // Normalize email to lowercase for consistency
+    const normalizedEmail = email.toLowerCase();
+
     // Check if user already exists
-    const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    const existingUser = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
     if (existingUser.length > 0) {
       return NextResponse.json({ error: "User with this email already exists" }, { status: 400 });
     }
 
     // Create new user
     const [newUser] = await db.insert(users).values({
-      email,
+      email: normalizedEmail,
       name: name || null,
       isAllowed: isAllowed ? 1 : 0,
       isAdmin: isAdmin ? 1 : 0,

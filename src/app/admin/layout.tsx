@@ -21,7 +21,7 @@ export default async function AdminLayout({
   const user = await db
     .select()
     .from(users)
-    .where(eq(users.email, session.user.email))
+    .where(eq(users.email, session.user.email.toLowerCase()))
     .limit(1);
 
   if (!user[0] || !user[0].isAdmin) {

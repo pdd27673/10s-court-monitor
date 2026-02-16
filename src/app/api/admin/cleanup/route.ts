@@ -14,13 +14,21 @@ export async function POST(request: Request) {
     }
 
     // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!user[0] || !user[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await request.json();
-    const days = body.days || 7;
+    const days = body.days !== undefined ? body.days : 7;
+
+    // Validate days parameter
+    if (typeof days !== 'number' || days < 1 || days > 365) {
+      return NextResponse.json(
+        { error: "Invalid days parameter: must be a number between 1 and 365" },
+        { status: 400 }
+      );
+    }
 
     // Calculate cutoff date
     const cutoffDate = new Date();
