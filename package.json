@@ -29,7 +29,9 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "resend": "^6.8.0",
-    "user-agents": "^1.1.669"
+    "typescript": "^5",
+    "user-agents": "^1.1.669",
+    "drizzle-kit": "^0.31.9"
   },
   "overrides": {
     "esbuild": "^0.25.0"
@@ -41,11 +43,9 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/user-agents": "^1.0.4",
-    "drizzle-kit": "^0.31.9",
     "eslint": "^9",
     "eslint-config-next": "16.1.4",
     "tailwindcss": "^4",
-    "tsx": "^4.21.0",
-    "typescript": "^5"
+    "tsx": "^4.21.0"
   }
 }
