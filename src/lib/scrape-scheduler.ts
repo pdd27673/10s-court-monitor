@@ -224,19 +224,28 @@ export async function runScheduledScrape(daysAhead: number = 8): Promise<Schedul
   const allSlots: ScrapedSlot[] = [];
   const errors: string[] = [];
 
-  // Scrape all due targets
-  const results = await Promise.allSettled(
-    dueTargets.map(async ({ venue, date }, index) => {
-      // Stagger requests slightly
-      await new Promise((r) => setTimeout(r, index * 100));
+  // Scrape all due targets with concurrency limit
+  const CONCURRENCY = 5;
+  const results: PromiseSettledResult<{ venue: string; date: string; slots: ScrapedSlot[] }>[] = new Array(dueTargets.length);
 
-      const slots = await scrapeVenue(venue, date);
-      await markTargetScraped(venue.slug, date);
+  const queue = dueTargets.map((target, index) => ({ target, index }));
+  const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (!item) break;
+      const { target: { venue, date }, index } = item;
+      try {
+        const slots = await scrapeVenue(venue, date);
+        await markTargetScraped(venue.slug, date);
+        console.log(`   ✅ ${venue.slug} ${date}: ${slots.length} slots`);
+        results[index] = { status: "fulfilled", value: { venue: venue.slug, date, slots } };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  });
 
-      console.log(`   ✅ ${venue.slug} ${date}: ${slots.length} slots`);
-      return { venue: venue.slug, date, slots };
-    })
-  );
+  await Promise.all(workers);
 
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
