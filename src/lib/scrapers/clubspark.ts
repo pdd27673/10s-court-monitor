@@ -44,7 +44,7 @@ export async function scrapeClubSpark(
     throw new Error(`Venue ${venue.slug} missing ClubSpark config`);
   }
 
-  const url = `https://${venue.clubsparkHost}/v0/VenueBooking/${venue.clubsparkId}/GetVenueSessions?resourceID=&startDate=${date}&endDate=${date}&roleId=`;
+  const url = `https://${venue.clubsparkHost}/v0/VenueBooking/${venue.clubsparkId}/GetVenueSessions?resourceID=&startDate=${date}&roleId=`;
 
   const agent = proxyManager.getAgent();
   console.log(`📍 ClubSpark ${venue.slug} | ${date} | ${agent ? "via proxy" : "DIRECT"}`);
