@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { scrapeTargets } from "./schema";
 import { VENUES, Venue } from "./constants";
-import { scrapeVenue, ScrapedSlot } from "./scrapers";
+import { scrapeVenue, scrapeClubSpark, ScrapedSlot } from "./scrapers";
 import { eq, and, lt, lte, isNull, or } from "drizzle-orm";
 
 /**
@@ -224,11 +224,50 @@ export async function runScheduledScrape(daysAhead: number = 8): Promise<Schedul
   const allSlots: ScrapedSlot[] = [];
   const errors: string[] = [];
 
-  // Scrape all due targets with concurrency limit
-  const CONCURRENCY = 5;
-  const results: PromiseSettledResult<{ venue: string; date: string; slots: ScrapedSlot[] }>[] = new Array(dueTargets.length);
+  // Separate ClubSpark targets (scraped per-venue) from Courtside (scraped per-date)
+  const clubsparkByVenue = new Map<string, ScrapeScheduleResult[]>();
+  const courtsideTargets: ScrapeScheduleResult[] = [];
 
-  const queue = dueTargets.map((target, index) => ({ target, index }));
+  for (const target of dueTargets) {
+    if (target.venue.type === "clubspark") {
+      if (!clubsparkByVenue.has(target.venue.slug)) {
+        clubsparkByVenue.set(target.venue.slug, []);
+      }
+      clubsparkByVenue.get(target.venue.slug)!.push(target);
+    } else {
+      courtsideTargets.push(target);
+    }
+  }
+
+  // ClubSpark: one request per venue covers the full scraping window
+  const today = new Date().toISOString().split("T")[0];
+  const windowEndDate = new Date();
+  windowEndDate.setDate(windowEndDate.getDate() + 7);
+  const windowEnd = windowEndDate.toISOString().split("T")[0];
+
+  for (const [, targets] of clubsparkByVenue) {
+    const venue = targets[0].venue;
+    try {
+      const venueSlots = await scrapeClubSpark(venue, today, windowEnd);
+      console.log(`   ✅ ${venue.slug} (${today}→${windowEnd}): ${venueSlots.length} slots`);
+      allSlots.push(...venueSlots);
+      for (const target of targets) {
+        await markTargetScraped(venue.slug, target.date);
+      }
+    } catch (reason) {
+      console.error(`   ❌ ${venue.slug}: ${reason}`);
+      for (const target of targets) {
+        errors.push(`${venue.slug} ${target.date}: ${reason}`);
+        await markTargetScraped(venue.slug, target.date);
+      }
+    }
+  }
+
+  // Courtside: concurrency-limited pool (per-date)
+  const CONCURRENCY = 5;
+  const queue = courtsideTargets.map((target, index) => ({ target, index }));
+  const courtsideResults: PromiseSettledResult<{ venue: string; date: string; slots: ScrapedSlot[] }>[] = new Array(courtsideTargets.length);
+
   const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     while (queue.length > 0) {
       const item = queue.shift();
@@ -238,18 +277,18 @@ export async function runScheduledScrape(daysAhead: number = 8): Promise<Schedul
         const slots = await scrapeVenue(venue, date);
         await markTargetScraped(venue.slug, date);
         console.log(`   ✅ ${venue.slug} ${date}: ${slots.length} slots`);
-        results[index] = { status: "fulfilled", value: { venue: venue.slug, date, slots } };
+        courtsideResults[index] = { status: "fulfilled", value: { venue: venue.slug, date, slots } };
       } catch (reason) {
-        results[index] = { status: "rejected", reason };
+        courtsideResults[index] = { status: "rejected", reason };
       }
     }
   });
 
   await Promise.all(workers);
 
-  for (let i = 0; i < results.length; i++) {
-    const result = results[i];
-    const target = dueTargets[i];
+  for (let i = 0; i < courtsideResults.length; i++) {
+    const result = courtsideResults[i];
+    const target = courtsideTargets[i];
 
     if (result.status === "fulfilled") {
       allSlots.push(...result.value.slots);
@@ -257,7 +296,6 @@ export async function runScheduledScrape(daysAhead: number = 8): Promise<Schedul
       const error = `${target.venue.slug} ${target.date}: ${result.reason}`;
       errors.push(error);
       console.error(`   ❌ ${error}`);
-      // Still mark as scraped to avoid retrying immediately
       await markTargetScraped(target.venue.slug, target.date);
     }
   }
