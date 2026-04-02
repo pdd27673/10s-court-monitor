@@ -14,7 +14,9 @@
     "db:sync": "tsx scripts/db-migrate.ts --push",
     "db:normalize-emails": "tsx scripts/normalize-emails.ts",
     "db:migrate-watches": "tsx scripts/migrate-watches-to-days.ts",
-    "maintain": "tsx scripts/maintain.ts"
+    "maintain": "tsx scripts/maintain.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",
@@ -48,6 +50,7 @@
     "@types/user-agents": "^1.0.4",
     "eslint": "^9",
     "eslint-config-next": "16.1.4",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "vitest": "^2.0.0"
   }
 }

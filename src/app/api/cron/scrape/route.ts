@@ -3,7 +3,7 @@ import { runScheduledScrape } from "@/lib/scrape-scheduler";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
 import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
 import { db } from "@/lib/db";
-import { slots, notificationLog } from "@/lib/schema";
+import { slots, notificationLog, scrapeTargets } from "@/lib/schema";
 import { lt, sql } from "drizzle-orm";
 import { proxyManager, formatBytes } from "@/lib/proxy-manager";
 import type { ScrapeStats } from "@/lib/scraper";
@@ -38,12 +38,19 @@ async function runCleanup() {
   }
 }
 
-async function runScrapeJob() {
+async function runScrapeJob(force = false) {
   try {
-    console.log("Starting scheduled scrape job...");
+    console.log(`Starting ${force ? "forced full" : "scheduled"} scrape job...`);
 
     // Ensure all venues exist in DB
     await ensureVenuesExist();
+
+    // If forced, reset all nextScrapeAt timestamps so every target is due now
+    if (force) {
+      const now = new Date().toISOString();
+      await db.update(scrapeTargets).set({ nextScrapeAt: now });
+      console.log("Force mode: reset all scrape targets to due now");
+    }
 
     // Reset proxy stats for this run
     proxyManager.resetStats();
@@ -126,9 +133,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Scrape job already running" }, { status: 409 });
   }
 
+  const force = new URL(request.url).searchParams.get("force") === "true";
+
   // Start the scrape job in the background (don't await)
   isJobRunning = true;
-  runScrapeJob()
+  runScrapeJob(force)
     .catch((error) => {
       console.error("Unhandled error in scrape job:", error);
     })
@@ -139,6 +148,6 @@ export async function POST(request: Request) {
   // Return immediately
   return NextResponse.json({
     success: true,
-    message: "Scrape job started",
+    message: force ? "Forced full scrape started" : "Scrape job started",
   });
 }
