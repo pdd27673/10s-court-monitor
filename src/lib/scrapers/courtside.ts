@@ -105,6 +105,12 @@ export async function scrapeCourtside(
           .trim();
         const court = buttonText || "Unknown";
 
+        // Skip non-tennis courts
+        const NON_TENNIS_KEYWORDS = ["cricket", "netball", "football", "basketball", "bowls", "bowling"];
+        if (NON_TENNIS_KEYWORDS.some((kw) => court.toLowerCase().includes(kw))) {
+          return;
+        }
+
         let status: "available" | "booked" | "closed" | "coaching";
         let price: string | undefined;
 

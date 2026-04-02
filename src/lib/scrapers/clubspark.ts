@@ -78,8 +78,15 @@ export async function scrapeClubSpark(
   const startHour = Math.floor(data.EarliestStartTime / 60);
   const endHour = Math.floor(data.LatestEndTime / 60);
 
+  const NON_TENNIS_KEYWORDS = ["cricket", "netball", "football", "basketball", "bowls", "bowling"];
+
   for (const resource of data.Resources) {
     const courtName = resource.Name;
+
+    // Skip non-tennis courts (e.g. cricket nets at West Ham Park)
+    if (NON_TENNIS_KEYWORDS.some((kw) => courtName.toLowerCase().includes(kw))) {
+      continue;
+    }
 
     for (const dayData of resource.Days) {
       const date = dayData.Date.split("T")[0];
