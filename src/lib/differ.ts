@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { slots, venues } from "./schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, notInArray } from "drizzle-orm";
 import { ScrapedSlot } from "./scraper";
 import { VENUES } from "./constants";
 
@@ -56,6 +56,9 @@ export async function storeAndDiff(scrapedSlots: ScrapedSlot[]): Promise<SlotCha
 
     const venueName = VENUES.find((v) => v.slug === venueSlug)?.name ?? venueSlug;
 
+    // Track upserted slot IDs so we can prune stale rows per date afterwards
+    const upsertedIdsByDate: Record<string, number[]> = {};
+
     for (const scrapedSlot of venueSlots) {
       // Find existing slot in database
       const existing = await db.query.slots.findFirst({
@@ -89,6 +92,7 @@ export async function storeAndDiff(scrapedSlots: ScrapedSlot[]): Promise<SlotCha
       }
 
       // Upsert the slot
+      let upsertedId: number;
       if (existing) {
         await db
           .update(slots)
@@ -98,16 +102,34 @@ export async function storeAndDiff(scrapedSlots: ScrapedSlot[]): Promise<SlotCha
             updatedAt: new Date().toISOString(),
           })
           .where(eq(slots.id, existing.id));
+        upsertedId = existing.id;
       } else {
-        await db.insert(slots).values({
+        const [inserted] = await db.insert(slots).values({
           venueId,
           date: scrapedSlot.date,
           time: scrapedSlot.time,
           court: scrapedSlot.court,
           status: newStatus,
           price: scrapedSlot.price,
-        });
+        }).returning({ id: slots.id });
+        upsertedId = inserted.id;
       }
+
+      if (!upsertedIdsByDate[scrapedSlot.date]) upsertedIdsByDate[scrapedSlot.date] = [];
+      upsertedIdsByDate[scrapedSlot.date].push(upsertedId);
+    }
+
+    // Prune slots for this venue+date that weren't in the latest scrape.
+    // This makes the scrape the source of truth and removes stale courts
+    // (e.g. cricket courts that existed before filtering was added).
+    for (const [date, upsertedIds] of Object.entries(upsertedIdsByDate)) {
+      await db.delete(slots).where(
+        and(
+          eq(slots.venueId, venueId),
+          eq(slots.date, date),
+          notInArray(slots.id, upsertedIds)
+        )
+      );
     }
   }
 
