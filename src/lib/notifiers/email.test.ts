@@ -37,10 +37,11 @@ beforeEach(async () => {
   vi.stubEnv("SCRAPE_FAILURE_THRESHOLD", "40");
   vi.stubEnv("SCRAPE_ALERT_COOLDOWN_HOURS", "1");
 
+  mockEmailSend.mockClear();
   mockEmailSend.mockResolvedValue({ data: { id: "test-id" }, error: null });
 
-  const module = await import("./email");
-  sendScrapeFailureAlert = module.sendScrapeFailureAlert;
+  const emailModule = await import("./email");
+  sendScrapeFailureAlert = emailModule.sendScrapeFailureAlert;
 });
 
 afterEach(() => {
@@ -80,8 +81,8 @@ describe("sendScrapeFailureAlert – threshold", () => {
   it("respects SCRAPE_FAILURE_THRESHOLD env override", async () => {
     vi.stubEnv("SCRAPE_FAILURE_THRESHOLD", "60");
     vi.resetModules();
-    const module = await import("./email");
-    sendScrapeFailureAlert = module.sendScrapeFailureAlert;
+    const emailModule = await import("./email");
+    sendScrapeFailureAlert = emailModule.sendScrapeFailureAlert;
 
     // 50% — below custom 60% threshold, no alert
     const notSent = await sendScrapeFailureAlert(makeStats(5, 5));
@@ -129,8 +130,8 @@ describe("sendScrapeFailureAlert – cooldown", () => {
     vi.useFakeTimers();
     vi.stubEnv("SCRAPE_ALERT_COOLDOWN_HOURS", "2");
     vi.resetModules();
-    const module = await import("./email");
-    sendScrapeFailureAlert = module.sendScrapeFailureAlert;
+    const emailModule = await import("./email");
+    sendScrapeFailureAlert = emailModule.sendScrapeFailureAlert;
 
     const stats = makeStats(4, 6); // 60%
 
