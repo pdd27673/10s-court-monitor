@@ -8,7 +8,7 @@ import type { ScrapeStats } from "../scraper";
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
 // Alert threshold: if failure rate exceeds this percentage, send alert
-const FAILURE_ALERT_THRESHOLD = parseFloat(process.env.SCRAPE_FAILURE_THRESHOLD || "20");
+const FAILURE_ALERT_THRESHOLD = parseFloat(process.env.SCRAPE_FAILURE_THRESHOLD || "40");
 
 // Cooldown between failure alert emails (default: 1 hour)
 const FAILURE_ALERT_COOLDOWN_MS =
