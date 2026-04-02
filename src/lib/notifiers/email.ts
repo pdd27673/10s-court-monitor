@@ -10,6 +10,13 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 // Alert threshold: if failure rate exceeds this percentage, send alert
 const FAILURE_ALERT_THRESHOLD = parseFloat(process.env.SCRAPE_FAILURE_THRESHOLD || "20");
 
+// Cooldown between failure alert emails (default: 1 hour)
+const FAILURE_ALERT_COOLDOWN_MS =
+  parseFloat(process.env.SCRAPE_ALERT_COOLDOWN_HOURS || "1") * 60 * 60 * 1000;
+
+// In-memory timestamp of last alert (persists across cron runs within the same process)
+let lastFailureAlertAt: number | null = null;
+
 // Resend client for HTTP-based email
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
@@ -165,6 +172,14 @@ export async function sendScrapeFailureAlert(stats: ScrapeStats): Promise<boolea
     return false;
   }
 
+  // Cooldown: don't spam alerts — at most one per cooldown window
+  const now = Date.now();
+  if (lastFailureAlertAt !== null && now - lastFailureAlertAt < FAILURE_ALERT_COOLDOWN_MS) {
+    const minutesRemaining = Math.ceil((FAILURE_ALERT_COOLDOWN_MS - (now - lastFailureAlertAt)) / 60000);
+    console.log(`🔕 Scrape failure alert suppressed (cooldown — ${minutesRemaining}m remaining)`);
+    return false;
+  }
+
   const subject = `⚠️ Scrape Alert: ${failureRate.toFixed(0)}% Failure Rate`;
 
   let html = `
@@ -212,6 +227,7 @@ export async function sendScrapeFailureAlert(stats: ScrapeStats): Promise<boolea
 
   try {
     await sendEmail(ADMIN_EMAIL, subject, html);
+    lastFailureAlertAt = Date.now();
     console.log(`🚨 Admin alert sent: ${failureRate.toFixed(1)}% failure rate`);
     return true;
   } catch (error) {
