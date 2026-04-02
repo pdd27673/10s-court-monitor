@@ -21,9 +21,9 @@ function makeHtml(courts: { name: string; cssClass: string }[]): string {
   const courtLabels = courts
     .map(
       ({ name, cssClass }) => `
-        <label class="court">
+        <td><label class="court">
           <span class="button ${cssClass}">${name}</span>
-        </label>`
+        </label></td>`
     )
     .join("");
 
