@@ -12,12 +12,10 @@ export default async function AdminLayout({
 }) {
   const session = await auth();
 
-  // Check if user is logged in
   if (!session?.user?.email) {
     redirect("/login");
   }
 
-  // Check if user is admin
   const user = await db
     .select()
     .from(users)
@@ -28,16 +26,15 @@ export default async function AdminLayout({
     redirect("/dashboard");
   }
 
-  // Get count of pending registration requests
   const pendingCount = await db
     .select({ count: count() })
     .from(registrationRequests)
     .where(eq(registrationRequests.status, "pending"));
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-[var(--bg)]">
       <AdminSidebar pendingRequestsCount={pendingCount[0].count} />
-      <div className="flex-1 p-8 ml-64">
+      <div className="flex-1 p-8 ml-64 max-w-full overflow-x-auto">
         {children}
       </div>
     </div>

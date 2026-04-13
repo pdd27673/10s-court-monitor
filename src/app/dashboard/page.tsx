@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useEffect, useState, Fragment, useCallback } from "react";
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { VENUES } from "@/lib/constants";
 import { getBookingUrl } from "@/lib/utils/link-helpers";
+import { SiteNav } from "@/components/layout/SiteNav";
 
 interface Slot {
   venueSlug?: string;
@@ -28,8 +29,18 @@ interface Watch {
   id: number;
   venueSlug: string | null;
   venueName: string | null;
-  weekdayTimes: string[];
-  weekendTimes: string[];
+  dayTimes: {
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  };
+  // Legacy fields for backward compatibility during migration
+  weekdayTimes?: string[];
+  weekendTimes?: string[];
   active: boolean;
 }
 
@@ -38,6 +49,18 @@ interface Channel {
   type: string;
   destination: string;
   active: boolean;
+}
+
+interface Match {
+  slotKey: string;
+  sentAt: string;
+  venueSlug: string;
+  venueName: string;
+  date: string;
+  time: string;
+  court: string;
+  currentStatus: "available" | "booked" | "closed" | "coaching" | "expired" | "unknown";
+  isExpired: boolean;
 }
 
 interface AdminStats {
@@ -192,10 +215,6 @@ function DashboardContent() {
   const searchParams = useSearchParams();
   const isGuest = searchParams.get("guest") === "true";
 
-  console.log("[Dashboard] searchParams:", searchParams.toString());
-  console.log("[Dashboard] isGuest:", isGuest);
-  console.log("[Dashboard] session status:", status);
-
   // Initialize from localStorage with validation
   const [selectedVenues, setSelectedVenues] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
@@ -225,8 +244,10 @@ function DashboardContent() {
   // Management state
   const [watches, setWatches] = useState<Watch[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [loadingWatches, setLoadingWatches] = useState(false);
   const [loadingChannels, setLoadingChannels] = useState(false);
+  const [loadingMatches, setLoadingMatches] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   
   // Initialize activeTab from URL or localStorage
@@ -270,6 +291,11 @@ function DashboardContent() {
   const [showChannelForm, setShowChannelForm] = useState(false);
   const [editingChannel, setEditingChannel] = useState<Channel | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  
+  // Bulk selection state
+  const [selectedWatchIds, setSelectedWatchIds] = useState<Set<number>>(new Set());
+  const [bulkEditMode, setBulkEditMode] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
 
   // Available time slots
   const TIME_SLOTS = [
@@ -361,15 +387,29 @@ function DashboardContent() {
             (w: {
               id: number;
               venue?: { slug: string; name: string } | null;
-              weekdayTimes: string[] | null;
-              weekendTimes: string[] | null;
+              dayTimes: {
+                monday: string[];
+                tuesday: string[];
+                wednesday: string[];
+                thursday: string[];
+                friday: string[];
+                saturday: string[];
+                sunday: string[];
+              } | null;
               active: number | boolean;
             }) => ({
               id: w.id,
               venueSlug: w.venue?.slug || null,
               venueName: w.venue?.name || null,
-              weekdayTimes: w.weekdayTimes || [],
-              weekendTimes: w.weekendTimes || [],
+              dayTimes: w.dayTimes || {
+                monday: [],
+                tuesday: [],
+                wednesday: [],
+                thursday: [],
+                friday: [],
+                saturday: [],
+                sunday: [],
+              },
               active: Boolean(w.active),
             })
           )
@@ -399,6 +439,23 @@ function DashboardContent() {
     }
   }, [status]);
 
+  const fetchMatches = useCallback(async () => {
+    if (status !== "authenticated") return;
+
+    setLoadingMatches(true);
+    try {
+      const res = await fetch("/api/user/matches");
+      const data = await res.json();
+      if (data.matches) {
+        setMatches(data.matches);
+      }
+    } catch (error) {
+      console.error("Failed to fetch matches:", error);
+    } finally {
+      setLoadingMatches(false);
+    }
+  }, [status]);
+
   // Check if user is admin
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.email) return;
@@ -418,12 +475,13 @@ function DashboardContent() {
     checkAdminStatus();
   }, [status, session?.user?.email]);
 
-  // Fetch watches and channels for authenticated users
+  // Fetch watches, channels, and matches for authenticated users
   useEffect(() => {
     if (status !== "authenticated") return;
     fetchWatches();
     fetchChannels();
-  }, [status, fetchWatches, fetchChannels]);
+    fetchMatches();
+  }, [status, fetchWatches, fetchChannels, fetchMatches]);
 
   // Show message helper
   const showMessage = (type: "success" | "error", text: string) => {
@@ -433,40 +491,66 @@ function DashboardContent() {
 
   // Watch management functions
   const handleCreateWatch = async (watchData: {
-    venueSlug: string | null;
-    weekdayTimes: string[];
-    weekendTimes: string[];
+    venueSlugs: string[];
+    dayTimes: {
+      monday: string[];
+      tuesday: string[];
+      wednesday: string[];
+      thursday: string[];
+      friday: string[];
+      saturday: string[];
+      sunday: string[];
+    };
   }) => {
     try {
-      const res = await fetch("/api/watches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(watchData),
-      });
+      // Create one watch per selected venue
+      const results = await Promise.all(
+        watchData.venueSlugs.map(venueSlug =>
+          fetch("/api/watches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              venueSlug,
+              dayTimes: watchData.dayTimes,
+            }),
+          })
+        )
+      );
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || "Failed to create watch");
+      // Check if all requests succeeded
+      const errors = results.filter(res => !res.ok);
+      if (errors.length > 0) {
+        throw new Error(`Failed to create ${errors.length} watch(es)`);
       }
 
       await fetchWatches();
       setShowWatchForm(false);
-      showMessage("success", "Watch created successfully!");
+      const count = watchData.venueSlugs.length;
+      showMessage("success", `${count} watch${count > 1 ? 'es' : ''} created successfully!`);
     } catch (error) {
       showMessage("error", getErrorMessage(error));
     }
   };
 
   const handleUpdateWatch = async (watchId: number, watchData: {
-    venueSlug: string | null;
-    weekdayTimes: string[];
-    weekendTimes: string[];
+    venueSlugs: string[];
+    dayTimes: {
+      monday: string[];
+      tuesday: string[];
+      wednesday: string[];
+      thursday: string[];
+      friday: string[];
+      saturday: string[];
+      sunday: string[];
+    };
   }) => {
     try {
       const res = await fetch(`/api/watches/${watchId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(watchData),
+        body: JSON.stringify({
+          dayTimes: watchData.dayTimes,
+        }),
       });
 
       if (!res.ok) {
@@ -520,6 +604,123 @@ function DashboardContent() {
     } catch (error) {
       showMessage("error", getErrorMessage(error));
     }
+  };
+
+  // Bulk operations
+  const handleBulkDelete = async () => {
+    if (selectedWatchIds.size === 0) return;
+    const count = selectedWatchIds.size;
+    if (!confirm(`Are you sure you want to delete ${count} watch${count > 1 ? 'es' : ''}?`)) return;
+
+    try {
+      const results = await Promise.allSettled(
+        Array.from(selectedWatchIds).map(id =>
+          fetch(`/api/watches/${id}`, { method: "DELETE" })
+        )
+      );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
+      await fetchWatches();
+      setSelectedWatchIds(new Set());
+      setSelectionMode(false);
+
+      if (succeeded > 0) {
+        showMessage("success", `Deleted ${succeeded} watch${succeeded > 1 ? 'es' : ''} successfully${failed > 0 ? ` (${failed} failed)` : ''}!`);
+      } else {
+        showMessage("error", "Failed to delete watches");
+      }
+    } catch (error) {
+      showMessage("error", error instanceof Error ? error.message : "Failed to delete watches");
+    }
+  };
+
+  const handleBulkToggle = async (activate: boolean) => {
+    if (selectedWatchIds.size === 0) return;
+
+    try {
+      const results = await Promise.allSettled(
+        Array.from(selectedWatchIds).map(id =>
+          fetch(`/api/watches/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ active: activate }),
+          })
+        )
+      );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
+      await fetchWatches();
+      setSelectedWatchIds(new Set());
+
+      if (succeeded > 0) {
+        showMessage("success", `${activate ? 'Activated' : 'Paused'} ${succeeded} watch${succeeded > 1 ? 'es' : ''} successfully${failed > 0 ? ` (${failed} failed)` : ''}!`);
+      } else {
+        showMessage("error", `Failed to ${activate ? 'activate' : 'pause'} watches`);
+      }
+    } catch (error) {
+      showMessage("error", error instanceof Error ? error.message : `Failed to ${activate ? 'activate' : 'pause'} watches`);
+    }
+  };
+
+  const handleBulkEdit = async (dayTimes: {
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }) => {
+    try {
+      const results = await Promise.allSettled(
+        Array.from(selectedWatchIds).map(id =>
+          fetch(`/api/watches/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dayTimes }),
+          })
+        )
+      );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
+      await fetchWatches();
+      setSelectedWatchIds(new Set());
+      setBulkEditMode(false);
+
+      if (succeeded > 0) {
+        showMessage("success", `Updated ${succeeded} watch${succeeded > 1 ? 'es' : ''} successfully${failed > 0 ? ` (${failed} failed)` : ''}!`);
+      } else {
+        showMessage("error", "Failed to update watches");
+      }
+    } catch (error) {
+      showMessage("error", error instanceof Error ? error.message : "Failed to update watches");
+    }
+  };
+
+  const toggleWatchSelection = (watchId: number) => {
+    setSelectedWatchIds(prev => {
+      const next = new Set(prev);
+      if (next.has(watchId)) {
+        next.delete(watchId);
+      } else {
+        next.add(watchId);
+      }
+      return next;
+    });
+  };
+
+  const selectAllWatches = () => {
+    setSelectedWatchIds(new Set(watches.map(w => w.id)));
+  };
+
+  const clearSelection = () => {
+    setSelectedWatchIds(new Set());
   };
 
   // Channel management functions
@@ -611,6 +812,22 @@ function DashboardContent() {
     }
   };
 
+  // Check if a time/venue/date matches any of the user's active watches
+  function slotMatchesWatch(time: string, venueSlug: string, dateStr: string): boolean {
+    if (!watches.length) return false;
+    const date = new Date(dateStr);
+    const dayOfWeek = date.getDay();
+    const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+    const dayName = dayNames[dayOfWeek];
+
+    return watches.some((watch) => {
+      if (!watch.active) return false;
+      if (watch.venueSlug !== null && watch.venueSlug !== venueSlug) return false;
+      const dayPrefs: string[] = watch.dayTimes[dayName] || [];
+      return dayPrefs.some((t) => t.toLowerCase().trim() === time.toLowerCase().trim());
+    });
+  }
+
   // Group slots by time and venue, aggregating counts and prices
   const slotsByTimeAndVenue: Record<string, Record<string, { available: number; booked: number; closed: number; coaching: number; prices: number[] }>> = {};
   const allTimes = new Set<string>();
@@ -677,8 +894,11 @@ function DashboardContent() {
   // Show loading while checking auth (unless guest)
   if (status === "loading" && !isGuest) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-500">Loading...</div>
+      <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center">
+        <div className="flex items-center gap-2 text-[var(--text-2)]">
+          <span className="inline-block w-4 h-4 rounded-full border-2 border-[var(--green)] border-t-transparent animate-spin" />
+          Loading...
+        </div>
       </div>
     );
   }
@@ -688,107 +908,51 @@ function DashboardContent() {
     return null;
   }
 
-  return (
-    <main className="min-h-screen p-8 max-w-4xl mx-auto">
-      {/* Back button */}
-      <Link
-        href="/"
-        className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors mb-6"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-        </svg>
-        Back to Home
-      </Link>
-      {/* Header */}
-      <div className="flex justify-between items-start mb-8">
-        <div>
-          <h1 className="text-3xl font-bold mb-2">Tennis Court Availability</h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            London tennis courts
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          {isGuest ? (
-            <Link
-              href="/login"
-              className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
-            >
-              Sign In
-            </Link>
-          ) : isAuthenticated ? (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600 dark:text-gray-400">
-                {session?.user?.email}
-              </span>
-              <button
-                onClick={() => signOut({ callbackUrl: "/" })}
-                className="px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm"
-              >
-                Sign Out
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </div>
+  // Map activeTab → SiteNav tab id
+  const navTabMap: Record<string, "courts" | "alerts" | "settings" | "admin"> = {
+    availability: "courts",
+    settings: "settings",
+    admin: "admin",
+  };
+  const dashTabMap: Record<string, "availability" | "settings" | "admin"> = {
+    courts: "availability",
+    alerts: "availability", // alerts shown on courts tab
+    settings: "settings",
+    admin: "admin",
+  };
 
+  return (
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+      {/* Sticky top nav with integrated tabs */}
+      <SiteNav
+        userEmail={isAuthenticated ? session?.user?.email : null}
+        isAdmin={isAdmin}
+        isGuest={isGuest}
+        activeTab={navTabMap[activeTab] ?? "courts"}
+        onTabChange={(tab) => {
+          const dashTab = dashTabMap[tab] ?? "availability";
+          setActiveTab(dashTab);
+          if (dashTab === "admin") {
+            router.push("/dashboard?tab=admin&adminTab=overview", { scroll: false });
+          } else {
+            router.push(`/dashboard?tab=${dashTab}`, { scroll: false });
+          }
+        }}
+      />
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
       {/* Guest banner */}
       {isGuest && (
-        <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-          <p className="text-sm text-yellow-800 dark:text-yellow-200">
-            You&apos;re viewing as a guest.{" "}
-            <Link href="/login" className="underline font-medium">
-              Sign in
-            </Link>{" "}
-            to set up notifications and manage your preferences.
+        <div className="mb-6 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between gap-4">
+          <p className="text-sm text-amber-400">
+            Browsing as guest — no notifications or saved preferences.
           </p>
-        </div>
-      )}
-
-      {/* Tabs for authenticated users */}
-      {isAuthenticated && (
-        <div className="flex gap-2 mb-6 border-b dark:border-gray-700">
-          <button
-            onClick={() => {
-              setActiveTab("availability");
-              router.push("/dashboard?tab=availability", { scroll: false });
-            }}
-            className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
-              activeTab === "availability"
-                ? "border-green-600 text-green-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
+          <Link
+            href="/login"
+            className="shrink-0 px-3 py-1.5 bg-[var(--green)] text-black rounded-lg text-xs font-semibold hover:bg-green-400 transition-all duration-150"
           >
-            Availability
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("settings");
-              router.push("/dashboard?tab=settings", { scroll: false });
-            }}
-            className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
-              activeTab === "settings"
-                ? "border-green-600 text-green-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Watches & Alerts
-          </button>
-          {isAdmin && (
-            <button
-              onClick={() => {
-                setActiveTab("admin");
-                router.push("/dashboard?tab=admin&adminTab=overview", { scroll: false });
-              }}
-              className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
-                activeTab === "admin"
-                  ? "border-green-600 text-green-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
-              Admin
-            </button>
-          )}
+            Sign in
+          </Link>
         </div>
       )}
 
@@ -804,9 +968,9 @@ function DashboardContent() {
               <button
                 type="button"
                 onClick={() => setVenueDropdownOpen(!venueDropdownOpen)}
-                className="w-full p-2 border rounded-lg bg-white dark:bg-gray-800 dark:border-gray-700 text-left flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="w-full p-2 border rounded-lg bg-[var(--surface)] text-left flex items-center justify-between hover:bg-[var(--surface)] transition-colors"
               >
-                <span className="text-sm text-gray-700 dark:text-gray-300">
+                <span className="text-sm text-[var(--text)]">
                   {selectedVenues.length === 0
                     ? "Select venues..."
                     : selectedVenues.length === 1
@@ -814,7 +978,7 @@ function DashboardContent() {
                     : `${selectedVenues.length} venues selected`}
                 </span>
                 <svg
-                  className={`w-5 h-5 text-gray-500 transition-transform ${
+                  className={`w-5 h-5 text-[var(--text-2)] transition-transform ${
                     venueDropdownOpen ? "rotate-180" : ""
                   }`}
                   fill="none"
@@ -836,11 +1000,11 @@ function DashboardContent() {
                     className="fixed inset-0 z-10"
                     onClick={() => setVenueDropdownOpen(false)}
                   />
-                  <div className="absolute z-20 w-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                  <div className="absolute z-20 w-full mt-1 bg-[var(--surface)] border rounded-lg shadow-lg max-h-64 overflow-y-auto">
                     <div className="p-2">
                       {/* Select All Checkbox */}
                       <label
-                        className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-200 dark:border-gray-700 mb-1"
+                        className="flex items-center gap-2 p-2 rounded hover:bg-[var(--surface)] cursor-pointer border-b border-[var(--border)] mb-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <input
@@ -858,9 +1022,9 @@ function DashboardContent() {
                               setSelectedVenues([VENUES[0].slug]);
                             }
                           }}
-                          className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                          className="w-4 h-4 text-green-600 border-[var(--border)] rounded focus:ring-green-500"
                         />
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        <span className="text-sm font-medium text-[var(--text)]">
                           All Venues
                         </span>
                       </label>
@@ -870,7 +1034,7 @@ function DashboardContent() {
                         return (
                           <label
                             key={venue.slug}
-                            className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+                            className="flex items-center gap-2 p-2 rounded hover:bg-[var(--surface)] cursor-pointer"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <input
@@ -888,9 +1052,9 @@ function DashboardContent() {
                                   }
                                 }
                               }}
-                              className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                              className="w-4 h-4 text-green-600 border-[var(--border)] rounded focus:ring-green-500"
                             />
-                            <span className="text-sm text-gray-700 dark:text-gray-300">
+                            <span className="text-sm text-[var(--text)]">
                               {venue.name}
                             </span>
                           </label>
@@ -914,7 +1078,7 @@ function DashboardContent() {
                     return (
                       <span
                         key={venueSlug}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded text-xs"
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-[var(--green)]/10 text-[var(--green)] rounded text-xs"
                       >
                         {venue.name}
                         <button
@@ -923,7 +1087,7 @@ function DashboardContent() {
                               selectedVenues.filter((v) => v !== venueSlug)
                             );
                           }}
-                          className="hover:text-green-600 dark:hover:text-green-300"
+                          className="hover:text-green-600"
                           aria-label={`Remove ${venue.name}`}
                         >
                           ×
@@ -938,16 +1102,16 @@ function DashboardContent() {
 
           {/* Date selector */}
           <div className="mb-6">
-            <label className="block text-sm font-medium mb-2">Date</label>
+            <label className="block text-xs font-medium text-[var(--text-3)] uppercase tracking-widest mb-2">Date</label>
             <div className="flex gap-2 flex-wrap">
               {dates.map((date) => (
                 <button
                   key={date}
                   onClick={() => setSelectedDate(date)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer ${
                     selectedDate === date
-                      ? "bg-green-600 text-white"
-                      : "bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+                      ? "bg-[var(--green)] text-black shadow-[0_0_12px_rgba(34,197,94,0.2)]"
+                      : "bg-[var(--surface)] border border-[var(--border)] text-[var(--text-2)] hover:border-[var(--text-3)] hover:text-[var(--text)]"
                   }`}
                 >
                   {formatDate(date)}
@@ -957,21 +1121,21 @@ function DashboardContent() {
           </div>
 
           {/* Availability table */}
-          <div className="border rounded-lg overflow-hidden dark:border-gray-700">
-            <div className="bg-gray-50 dark:bg-gray-800 px-4 py-3 border-b dark:border-gray-700">
-              <div className="flex justify-between items-start">
+          <div className="border border-[var(--border)] rounded-xl overflow-hidden">
+            <div className="bg-[var(--surface)] px-4 py-3 border-b border-[var(--border)]">
+              <div className="flex justify-between items-center">
                 <div>
-                  <h2 className="font-semibold">Availability</h2>
-                  <p className="text-sm text-gray-500">{formatDate(selectedDate)}</p>
+                  <h2 className="font-semibold text-[var(--text)]">Availability</h2>
+                  <p className="text-xs text-[var(--text-3)] font-[family-name:var(--font-mono)] mt-0.5">{formatDate(selectedDate)}</p>
                 </div>
                 {availability?.lastUpdated && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-full border border-gray-200 dark:border-gray-600">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-2)] rounded-full border border-[var(--border)]">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--green)] opacity-60"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[var(--green)]"></span>
                     </span>
-                    <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                      Updated {new Date(availability.lastUpdated).toLocaleString("en-GB", {
+                    <span className="text-xs font-[family-name:var(--font-mono)] text-[var(--text-3)]">
+                      {new Date(availability.lastUpdated).toLocaleString("en-GB", {
                         day: "numeric",
                         month: "short",
                         hour: "2-digit",
@@ -984,44 +1148,56 @@ function DashboardContent() {
             </div>
 
             {loading ? (
-              <div className="p-8 text-center text-gray-500">Loading...</div>
+              <div className="p-8 text-center flex items-center justify-center gap-2 text-[var(--text-2)]">
+                <span className="inline-block w-4 h-4 rounded-full border-2 border-[var(--green)] border-t-transparent animate-spin" />
+                Loading courts...
+              </div>
             ) : selectedVenueInfo.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">
-                Please select at least one venue
+              <div className="p-8 text-center text-[var(--text-3)]">
+                Select at least one venue above
               </div>
             ) : sortedTimes.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">
-                No availability data. Run a scrape first.
+              <div className="p-8 text-center text-[var(--text-3)]">
+                No data yet — check back after the next scrape.
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full" style={{ tableLayout: "fixed", minWidth: "600px" }}>
                   <colgroup>
-                    <col style={{ width: "80px" }} />
+                    <col style={{ width: "76px" }} />
                     {selectedVenueInfo.map((venue) => (
                       <col key={venue.slug} style={{ width: "150px" }} />
                     ))}
                   </colgroup>
-                  <thead className="bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700">
+                  <thead className="bg-[var(--surface-2)] border-b border-[var(--border)]">
                     <tr>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-gray-300 sticky left-0 bg-gray-50 dark:bg-gray-800 z-10 border-r dark:border-gray-700">
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-[var(--text-3)] uppercase tracking-widest sticky left-0 bg-[var(--bg)] z-10 border-r border-[var(--border)]">
                         Time
                       </th>
                       {selectedVenueInfo.map((venue) => (
                         <th
                           key={venue.slug}
-                          className="px-4 py-3 text-center text-sm font-semibold text-gray-700 dark:text-gray-300"
+                          className="px-4 py-2.5 text-center text-xs font-semibold text-[var(--text-2)] uppercase tracking-widest"
                         >
                           {venue.name}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y dark:divide-gray-700">
-                    {sortedTimes.map((time) => (
-                      <tr key={time} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                        <td className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300 sticky left-0 bg-white dark:bg-gray-900 z-10 border-r dark:border-gray-700">
-                          {time}
+                  <tbody className="divide-y divide-[var(--border-subtle)]">
+                    {sortedTimes.map((time) => {
+                      const isWatchMatch = isAuthenticated && selectedVenueInfo.some((v) =>
+                        slotMatchesWatch(time, v.slug, selectedDate)
+                      );
+                      return (
+                      <tr key={time} className={`transition-colors duration-100 hover:bg-[var(--surface)] ${isWatchMatch ? "border-l-2 border-l-[var(--green)]" : ""}`}>
+                        <td className={`px-4 py-2.5 sticky left-0 z-10 border-r border-[var(--border)] bg-[var(--bg)] ${isWatchMatch ? "text-[var(--green)]" : "text-[var(--text-2)]"}`}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-[family-name:var(--font-mono)] text-sm tabular-nums">{time}</span>
+                            {isWatchMatch && (
+                              <span title="Matches your watch" className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[var(--green)] text-black text-[8px] font-bold shrink-0">★</span>
+                            )}
+                          </div>
                         </td>
                         {selectedVenueInfo.map((venue) => {
                           const venueData = slotsByTimeAndVenue[time]?.[venue.slug] || {
@@ -1037,14 +1213,14 @@ function DashboardContent() {
                           const isBooked = venueData.booked > 0 && venueData.available === 0 && venueData.coaching === 0;
                           const isClosed = total > 0 && venueData.available === 0 && venueData.booked === 0 && venueData.coaching === 0;
 
-                          let statusClass = "bg-gray-100 dark:bg-gray-800 text-gray-600";
-                          let statusText = "No data";
+                          let statusClass = "bg-transparent text-[var(--text-3)] border border-transparent";
+                          let statusText = "—";
                           let showCount = false;
                           let statusCount = 0;
                           let minPrice: number | null = null;
 
                           if (hasAvailable) {
-                            statusClass = "bg-green-500 text-white";
+                            statusClass = "bg-[var(--green)]/10 border border-[var(--green)]/30 text-[var(--green)]";
                             statusText = "Available";
                             statusCount = venueData.available;
                             showCount = true;
@@ -1052,40 +1228,38 @@ function DashboardContent() {
                               minPrice = Math.min(...venueData.prices);
                             }
                           } else if (isCoaching) {
-                            statusClass = "bg-blue-400 text-white";
+                            statusClass = "bg-blue-500/10 border border-blue-500/20 text-blue-400";
                             statusText = "Coaching";
                           } else if (isBooked) {
-                            statusClass = "bg-red-400 text-white";
+                            statusClass = "bg-red-500/10 border border-red-500/20 text-red-400/70";
                             statusText = "Booked";
                           } else if (isClosed) {
-                            statusClass = "bg-gray-300 text-gray-600";
+                            statusClass = "bg-[var(--surface)] border border-[var(--border-subtle)] text-[var(--text-3)]";
                             statusText = "Closed";
                           }
 
                           const cellContent = (
-                            <div className={`px-3 py-2 rounded text-center text-sm font-medium min-h-[60px] flex flex-col justify-center ${statusClass}`}>
-                              <div>{statusText}</div>
-                              <div className="text-xs opacity-90 mt-1 h-8 flex flex-col items-center justify-center">
-                                {showCount && total > 0 && (
-                                  <>
-                                    <div>{statusCount} court{statusCount !== 1 ? "s" : ""}</div>
-                                    {minPrice !== null && (
-                                      <div className="text-[10px] opacity-75">from £{minPrice.toFixed(2)}</div>
-                                    )}
-                                  </>
-                                )}
-                              </div>
+                            <div className={`px-2 py-2 rounded-lg text-center text-xs font-medium min-h-[52px] flex flex-col justify-center gap-0.5 ${statusClass}`}>
+                              <div className="font-semibold">{statusText}</div>
+                              {showCount && total > 0 && (
+                                <div className="opacity-70">
+                                  <div className="font-[family-name:var(--font-mono)]">{statusCount} court{statusCount !== 1 ? "s" : ""}</div>
+                                  {minPrice !== null && (
+                                    <div className="text-[10px]">from £{minPrice.toFixed(2)}</div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           );
 
                           return (
-                            <td key={venue.slug} className="px-4 py-3">
+                            <td key={venue.slug} className="px-2 py-2">
                               {hasAvailable ? (
                                 <a
                                   href={getBookingUrl(venue.slug, selectedDate)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="block hover:opacity-90 transition-opacity cursor-pointer"
+                                  className="block hover:scale-[1.02] transition-transform duration-100 cursor-pointer"
                                 >
                                   {cellContent}
                                 </a>
@@ -1096,7 +1270,8 @@ function DashboardContent() {
                           );
                         })}
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1104,9 +1279,9 @@ function DashboardContent() {
           </div>
 
           {/* Legend */}
-          <div className="mt-4 flex gap-4 text-sm">
+          <div className="mt-4 flex flex-wrap gap-4 text-sm">
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-green-500"></div>
+              <div className="w-3 h-3 rounded-sm bg-[var(--green)]/30 border border-[var(--green)]/50"></div>
               <span>Available</span>
             </div>
             <div className="flex items-center gap-2">
@@ -1118,34 +1293,130 @@ function DashboardContent() {
               <span>Booked</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded bg-gray-300"></div>
+              <div className="w-3 h-3 rounded bg-[var(--surface-3)] border border-[var(--border)]"></div>
               <span>Closed</span>
             </div>
+            {isAuthenticated && watches.some(w => w.active) && (
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[var(--green)] text-black text-[8px] font-bold">★</span>
+                <span>Matches your watch</span>
+              </div>
+            )}
           </div>
 
-          {/* Link to booking site */}
+          {/* Quick book links */}
           {selectedVenues.length > 0 && (
-            <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                Ready to book?
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {selectedVenues.map((venueSlug) => {
-                  const venue = VENUES.find((v) => v.slug === venueSlug);
-                  if (!venue) return null;
-                  return (
-                    <a
-                      key={venueSlug}
-                      href={getBookingUrl(venueSlug, selectedDate)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-block px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
-                    >
-                      Book {venue.name}
-                    </a>
-                  );
-                })}
+            <div className="mt-6 flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-[var(--text-3)] uppercase tracking-widest">Quick book:</span>
+              {selectedVenues.map((venueSlug) => {
+                const venue = VENUES.find((v) => v.slug === venueSlug);
+                if (!venue) return null;
+                return (
+                  <a
+                    key={venueSlug}
+                    href={getBookingUrl(venueSlug, selectedDate)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--green)] hover:text-[var(--green)] rounded-lg text-xs font-medium transition-all duration-150"
+                  >
+                    {venue.name}
+                    <svg className="w-3 h-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                );
+              })}
+            </div>
+          )}
+
+          {/* My Recent Alerts — always visible below the table for authenticated users */}
+          {isAuthenticated && (
+            <div className="mt-8">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-[var(--text)] uppercase tracking-widest">Recent Alerts</h2>
+                {matches.length > 0 && (
+                  <span className="text-xs text-[var(--text-3)]">Last {matches.length} notified slots</span>
+                )}
               </div>
+              {loadingMatches ? (
+                <div className="flex items-center gap-2 py-4 text-[var(--text-3)] text-sm">
+                  <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-[var(--green)] border-t-transparent animate-spin" />
+                  Loading alerts...
+                </div>
+              ) : matches.length === 0 ? (
+                <div className="py-6 border border-dashed border-[var(--border)] rounded-xl text-center text-sm text-[var(--text-3)]">
+                  No alerts yet.{" "}
+                  <button
+                    onClick={() => {
+                      setActiveTab("settings");
+                      router.push("/dashboard?tab=settings", { scroll: false });
+                    }}
+                    className="text-[var(--green)] hover:underline cursor-pointer"
+                  >
+                    Set up a watch
+                  </button>
+                  {" "}to get notified when slots open.
+                </div>
+              ) : (
+                <div className="border border-[var(--border)] rounded-xl overflow-hidden">
+                  <div className="divide-y divide-[var(--border-subtle)]">
+                    {matches.map((match) => {
+                      const isAvailable = match.currentStatus === "available";
+                      const isExpired = match.isExpired || match.currentStatus === "expired";
+                      const isTaken = !isAvailable && !isExpired;
+
+                      return (
+                        <div key={match.slotKey} className="flex items-center justify-between px-4 py-3 gap-3 hover:bg-[var(--surface)] transition-colors duration-100">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-sm text-[var(--text)]">{match.venueName}</span>
+                              <span className="text-[var(--border)] text-xs">·</span>
+                              <span className="text-sm text-[var(--text-2)] font-[family-name:var(--font-mono)]">
+                                {new Date(match.date).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+                              </span>
+                              <span className="text-[var(--border)] text-xs">·</span>
+                              <span className="text-sm font-[family-name:var(--font-mono)] text-[var(--text-2)]">{match.time}</span>
+                              <span className="text-xs text-[var(--text-3)] truncate max-w-[120px] font-[family-name:var(--font-mono)]">{match.court}</span>
+                            </div>
+                            <div className="text-xs text-[var(--text-3)] mt-0.5">
+                              Alerted {new Date(match.sentAt!).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {isAvailable ? (
+                              <>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--green)]/10 text-[var(--green)] border border-[var(--green)]/20">
+                                  Available
+                                </span>
+                                <a
+                                  href={getBookingUrl(match.venueSlug, match.date)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3 py-1.5 bg-[var(--green)] text-black rounded-lg text-xs font-semibold hover:bg-green-400 transition-all duration-150 shadow-[0_0_8px_rgba(34,197,94,0.2)]"
+                                >
+                                  Book Now
+                                </a>
+                              </>
+                            ) : isExpired ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--surface-2)] text-[var(--text-3)] border border-[var(--border)]">
+                                Expired
+                              </span>
+                            ) : isTaken ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                                Taken
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--surface-2)] text-[var(--text-3)] border border-[var(--border)]">
+                                Unknown
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -1157,17 +1428,17 @@ function DashboardContent() {
           {/* Message Banner */}
           {message && (
             <div
-              className={`p-4 rounded-lg ${
+              className={`px-4 py-3 rounded-xl border text-sm ${
                 message.type === "success"
-                  ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800"
-                  : "bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
+                  ? "bg-[var(--green)]/10 border-[var(--green)]/20 text-[var(--green)]"
+                  : "bg-red-500/10 border-red-500/20 text-red-400"
               }`}
             >
               <p
                 className={`text-sm ${
                   message.type === "success"
-                    ? "text-green-800 dark:text-green-200"
-                    : "text-red-800 dark:text-red-200"
+                    ? "text-[var(--green)]"
+                    : "text-red-400"
                 }`}
               >
                 {message.text}
@@ -1180,112 +1451,404 @@ function DashboardContent() {
             <div className="flex justify-between items-center mb-4">
               <div>
                 <h2 className="text-xl font-semibold">Your Watches</h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                <p className="text-sm text-[var(--text-2)] mt-1">
                   Watches define which venues and time slots you want to be notified
                   about when they become available.
                 </p>
               </div>
-              <button
-                onClick={() => {
-                  setEditingWatch(null);
-                  setShowWatchForm(true);
-                }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
-              >
-                + Create Watch
-              </button>
-            </div>
-
-            {loadingWatches ? (
-              <div className="p-4 text-center text-gray-500">Loading...</div>
-            ) : watches.length === 0 ? (
-              <div className="p-6 border border-dashed rounded-lg dark:border-gray-700 text-center">
-                <p className="text-gray-500 mb-4">No watches configured yet.</p>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setSelectionMode(!selectionMode);
+                    if (selectionMode) {
+                      setSelectedWatchIds(new Set());
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-sm ${
+                    selectionMode
+                      ? "bg-blue-500 text-white hover:bg-blue-700"
+                      : "bg-[var(--surface-2)] text-[var(--text)] hover:bg-[var(--surface-3)]"
+                  }`}
+                  title="Bulk delete watches"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  {selectionMode && "Cancel"}
+                </button>
                 <button
                   onClick={() => {
                     setEditingWatch(null);
                     setShowWatchForm(true);
                   }}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
+                  className="flex items-center gap-2 px-4 py-2 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 transition-colors text-sm"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {loadingWatches ? (
+              <div className="p-4 text-center text-[var(--text-2)]">Loading...</div>
+            ) : watches.length === 0 ? (
+              <div className="p-6 border border-dashed rounded-xl text-center">
+                <p className="text-[var(--text-2)] mb-4">No watches configured yet.</p>
+                <button
+                  onClick={() => {
+                    setEditingWatch(null);
+                    setShowWatchForm(true);
+                  }}
+                  className="px-4 py-2 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 transition-colors text-sm"
                 >
                   Create Your First Watch
                 </button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {watches.map((watch) => (
-                  <div
-                    key={watch.id}
-                    className={`p-4 border rounded-lg dark:border-gray-700 ${
-                      watch.active
-                        ? "bg-white dark:bg-gray-800"
-                        : "bg-gray-50 dark:bg-gray-900 opacity-60"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-medium">
-                          {watch.venueName ?? "All Venues"}
-                        </h3>
-                        <span
-                          className={`inline-block mt-1 text-xs px-2 py-0.5 rounded ${
-                            watch.active
-                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-                          }`}
-                        >
-                          {watch.active ? "Active" : "Paused"}
+              <div className="space-y-6">
+                {/* Bulk Actions Bar */}
+                {selectionMode && selectedWatchIds.size > 0 && (
+                  <div className="sticky top-0 z-10 bg-[var(--surface)] border-2 border-blue-500 rounded-lg p-4 shadow-lg">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm font-medium text-[var(--text)]">
+                          {selectedWatchIds.size} watch{selectedWatchIds.size > 1 ? 'es' : ''} selected
                         </span>
+                        <button
+                          onClick={clearSelection}
+                          className="text-xs text-[var(--text-2)] hover:text-[var(--text)]"
+                        >
+                          Clear selection
+                        </button>
                       </div>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => handleToggleWatch(watch.id, watch.active)}
-                          className={`px-3 py-1 text-xs rounded ${
-                            watch.active
-                              ? "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
-                              : "bg-green-100 dark:bg-green-900 hover:bg-green-200 dark:hover:bg-green-800"
-                          }`}
+                          onClick={() => handleBulkToggle(true)}
+                          className="px-3 py-1.5 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-lg font-medium transition-colors"
                         >
-                          {watch.active ? "Pause" : "Activate"}
+                          Activate All
                         </button>
                         <button
-                          onClick={() => setEditingWatch(watch)}
-                          className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 rounded"
+                          onClick={() => handleBulkToggle(false)}
+                          className="px-3 py-1.5 text-xs bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text)] rounded-lg font-medium transition-colors"
                         >
-                          Edit
+                          Pause All
                         </button>
                         <button
-                          onClick={() => handleDeleteWatch(watch.id)}
-                          className="px-3 py-1 text-xs bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 rounded"
+                          onClick={() => setBulkEditMode(true)}
+                          className="px-3 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium transition-colors"
                         >
-                          Delete
+                          Bulk Edit
                         </button>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-gray-500 dark:text-gray-400 mb-1">
-                          Weekday Times
-                        </p>
-                        <p>
-                          {watch.weekdayTimes.length > 0
-                            ? watch.weekdayTimes.join(", ")
-                            : "Not set"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-gray-500 dark:text-gray-400 mb-1">
-                          Weekend Times
-                        </p>
-                        <p>
-                          {watch.weekendTimes.length > 0
-                            ? watch.weekendTimes.join(", ")
-                            : "Not set"}
-                        </p>
+                        <button
+                          onClick={handleBulkDelete}
+                          className="px-3 py-1.5 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded-lg font-medium transition-colors"
+                        >
+                          Delete ({selectedWatchIds.size})
+                        </button>
                       </div>
                     </div>
                   </div>
-                ))}
+                )}
+
+                {/* Select All Checkbox - Only show in selection mode */}
+                {watches.length > 0 && selectionMode && (
+                  <div className="flex items-center gap-2 pb-2">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={selectedWatchIds.size === watches.length && watches.length > 0}
+                        ref={(input) => {
+                          if (input) {
+                            input.indeterminate = selectedWatchIds.size > 0 && selectedWatchIds.size < watches.length;
+                          }
+                        }}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            selectAllWatches();
+                          } else {
+                            clearSelection();
+                          }
+                        }}
+                        className="sr-only peer"
+                      />
+                      <div className="w-5 h-5 border-2 rounded-md bg-[var(--surface)] transition-all duration-200 flex items-center justify-center group-hover:border-[var(--green)] peer-focus:ring-1 peer-focus:ring-[var(--green-border)] peer-checked:bg-[var(--green)] peer-checked:border-[var(--green)] peer-indeterminate:bg-[var(--green)] peer-indeterminate:border-[var(--green)] border-[var(--border)]">
+                        {selectedWatchIds.size === watches.length && watches.length > 0 ? (
+                          <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : selectedWatchIds.size > 0 && selectedWatchIds.size < watches.length ? (
+                          <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M5 12h14" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
+                          </svg>
+                        ) : null}
+                      </div>
+                      <span className="text-sm text-[var(--text)] font-medium">
+                        Select all watches
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {(() => {
+                  // Color palette for watches
+                  const WATCH_COLORS = [
+                    { bg: 'bg-blue-500', bgLight: 'bg-blue-100', bgDark: 'dark:bg-blue-900/30', text: 'text-blue-700', textDark: 'dark:text-blue-300', border: 'border-blue-500', borderLight: 'border-blue-200', borderDark: 'dark:border-blue-800' },
+                    { bg: 'bg-purple-500', bgLight: 'bg-purple-100', bgDark: 'dark:bg-purple-900/30', text: 'text-purple-700', textDark: 'dark:text-purple-300', border: 'border-purple-500', borderLight: 'border-purple-200', borderDark: 'dark:border-purple-800' },
+                    { bg: 'bg-pink-500', bgLight: 'bg-pink-100', bgDark: 'dark:bg-pink-900/30', text: 'text-pink-700', textDark: 'dark:text-pink-300', border: 'border-pink-500', borderLight: 'border-pink-200', borderDark: 'dark:border-pink-800' },
+                    { bg: 'bg-indigo-500', bgLight: 'bg-indigo-100', bgDark: 'dark:bg-indigo-900/30', text: 'text-indigo-700', textDark: 'dark:text-indigo-300', border: 'border-indigo-500', borderLight: 'border-indigo-200', borderDark: 'dark:border-indigo-800' },
+                    { bg: 'bg-cyan-500', bgLight: 'bg-cyan-100', bgDark: 'dark:bg-cyan-900/30', text: 'text-cyan-700', textDark: 'dark:text-cyan-300', border: 'border-cyan-500', borderLight: 'border-cyan-200', borderDark: 'dark:border-cyan-800' },
+                    { bg: 'bg-emerald-500', bgLight: 'bg-emerald-100', bgDark: 'dark:bg-emerald-900/30', text: 'text-emerald-700', textDark: 'dark:text-emerald-300', border: 'border-emerald-500', borderLight: 'border-emerald-200', borderDark: 'dark:border-emerald-800' },
+                    { bg: 'bg-amber-500', bgLight: 'bg-amber-100', bgDark: 'dark:bg-amber-900/30', text: 'text-amber-700', textDark: 'dark:text-amber-300', border: 'border-amber-500', borderLight: 'border-amber-200', borderDark: 'dark:border-amber-800' },
+                    { bg: 'bg-orange-500', bgLight: 'bg-orange-100', bgDark: 'dark:bg-orange-900/30', text: 'text-orange-700', textDark: 'dark:text-orange-300', border: 'border-orange-500', borderLight: 'border-orange-200', borderDark: 'dark:border-orange-800' },
+                  ];
+
+                  // Assign colors to watches
+                  const watchesWithColors = watches.map((watch, index) => ({
+                    ...watch,
+                    color: WATCH_COLORS[index % WATCH_COLORS.length],
+                  })) as Array<Watch & { color: typeof WATCH_COLORS[0] }>;
+
+                  // Group watches by venue
+                  type WatchWithColor = Watch & { color: typeof WATCH_COLORS[0] };
+                  const groupedWatches = watchesWithColors.reduce((acc, watch) => {
+                    const venueKey = watch.venueName ?? "Other";
+                    if (!acc[venueKey]) {
+                      acc[venueKey] = [];
+                    }
+                    acc[venueKey].push(watch);
+                    return acc;
+                  }, {} as Record<string, WatchWithColor[]>);
+
+                  return Object.entries(groupedWatches).map(([venueName, venueWatches]) => {
+                    const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+                    const DAY_LABELS = {
+                      monday: 'Mon',
+                      tuesday: 'Tue',
+                      wednesday: 'Wed',
+                      thursday: 'Thu',
+                      friday: 'Fri',
+                      saturday: 'Sat',
+                      sunday: 'Sun',
+                    };
+
+                    // Get all unique time slots across all watches
+                    const allTimeSlots = new Set<string>();
+                    venueWatches.forEach(watch => {
+                      Object.values(watch.dayTimes).forEach(times => {
+                        times.forEach(time => allTimeSlots.add(time));
+                      });
+                    });
+                    const sortedTimeSlots = TIME_SLOTS.filter(t => allTimeSlots.has(t));
+
+                    return (
+                      <div key={venueName} className="border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--surface)] border border-[var(--border)]">
+                        {/* Venue Header with Watch Legend */}
+                        <div className="bg-[var(--surface)] px-4 py-3 border-b border-[var(--border)]">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-3">
+                              <h3 className="font-semibold text-lg text-[var(--text)]">{venueName}</h3>
+                              <span className="text-xs text-[var(--text-2)] bg-[var(--surface)] px-2 py-0.5 rounded-full border border-[var(--border)]">
+                                {venueWatches.length} watch{venueWatches.length > 1 ? 'es' : ''}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Watch Color Legend */}
+                          <div className="flex flex-wrap gap-3 mt-2">
+                            {venueWatches.map((watch) => (
+                              <div key={watch.id} className="flex items-center gap-1.5">
+                                <div className={`w-3 h-3 rounded-full ${watch.color.bg}`}></div>
+                                <span className="text-xs text-[var(--text-2)]">
+                                  {watch.venueName || 'Watch'} {watch.active ? '' : '(Paused)'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                      {/* Calendar View */}
+                      <div className="p-4">
+                        {sortedTimeSlots.length === 0 ? (
+                          <p className="text-sm text-[var(--text-2)] text-center py-8">
+                            No times configured for any watch
+                          </p>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <div className="inline-block min-w-full">
+                              {/* Calendar Header */}
+                              <div className="grid grid-cols-8 gap-1 mb-2">
+                                <div className="text-xs font-semibold text-[var(--text-2)] py-2">
+                                  Time
+                                </div>
+                                {DAYS.map((day) => (
+                                  <div key={day} className="text-xs font-semibold text-[var(--text)] text-center py-2">
+                                    {DAY_LABELS[day]}
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Calendar Rows */}
+                              <div className="space-y-1">
+                                {sortedTimeSlots.map((time) => (
+                                  <div key={time} className="grid grid-cols-8 gap-1">
+                                    {/* Time Label */}
+                                    <div className="text-xs text-[var(--text-2)] py-1.5 flex items-center">
+                                      {time}
+                                    </div>
+                                    
+                                    {/* Day Columns */}
+                                    {DAYS.map((day) => {
+                                      // Find watches that have this time on this day
+                                      const watchesForThisSlot = venueWatches.filter((watch): watch is WatchWithColor => 
+                                        watch.dayTimes[day]?.includes(time) ?? false
+                                      );
+
+                                      return (
+                                        <div
+                                          key={day}
+                                          className="min-h-[32px] border border-[var(--border)] rounded p-1 flex flex-wrap gap-0.5 items-start"
+                                        >
+                                          {watchesForThisSlot.map((watch) => {
+                                            const isSelected = selectedWatchIds.has(watch.id);
+                                            return (
+                                              <div
+                                                key={watch.id}
+                                                className={`flex-1 min-w-[20px] h-6 rounded ${watch.color.bgLight} ${watch.color.bgDark} border ${watch.color.borderLight} ${watch.color.borderDark} flex items-center justify-center cursor-pointer transition-all ${
+                                                  isSelected ? 'ring-2 ring-blue-500' : ''
+                                                } ${!watch.active ? 'opacity-50' : ''}`}
+                                                title={`${watch.venueName || 'Watch'} - ${time} ${day}`}
+                                                onClick={() => {
+                                                  if (selectionMode) {
+                                                    toggleWatchSelection(watch.id);
+                                                  } else {
+                                                    const { color: _color, ...watchWithoutColor } = watch;
+                                                    setEditingWatch(watchWithoutColor);
+                                                  }
+                                                }}
+                                              >
+                                                {selectionMode && (
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleWatchSelection(watch.id)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    className="sr-only peer"
+                                                  />
+                                                )}
+                                                <div className={`w-2 h-2 rounded-full ${watch.color.bg}`}></div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Watch Actions Row */}
+                        <div className="mt-4 pt-4 border-t border-[var(--border)] flex flex-wrap gap-2">
+                          {venueWatches.map((watch) => {
+                            const isSelected = selectedWatchIds.has(watch.id);
+                            const totalTimeSlots = Object.values(watch.dayTimes)
+                              .reduce((sum, times) => sum + times.length, 0);
+
+                            return (
+                              <div
+                                key={watch.id}
+                                className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                                  isSelected
+                                    ? "bg-blue-50 border-blue-500"
+                                    : "bg-[var(--surface)] border-[var(--border)]"
+                                }`}
+                              >
+                                {/* Checkbox - Only show in selection mode */}
+                                {selectionMode && (
+                                  <label className="cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleWatchSelection(watch.id)}
+                                      className="sr-only peer"
+                                    />
+                                    <div className={`w-4 h-4 border-2 rounded-md bg-[var(--surface)] transition-all duration-200 flex items-center justify-center peer-focus:ring-2 peer-focus:ring-green-500 peer-focus:ring-offset-1 ${
+                                      isSelected
+                                        ? "bg-[var(--green)] border-[var(--green)] shadow-sm"
+                                        : "border-[var(--border)]"
+                                    }`}>
+                                      {isSelected && (
+                                        <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                      )}
+                                    </div>
+                                  </label>
+                                )}
+                                
+                                {/* Color Indicator */}
+                                <div className={`w-3 h-3 rounded-full ${watch.color.bg}`}></div>
+                                
+                                {/* Watch Info */}
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    watch.active
+                                      ? "bg-[var(--green)]/10 text-[var(--green)]"
+                                      : "bg-[var(--surface-3)] text-[var(--text-2)]"
+                                  }`}>
+                                    {watch.active ? "Active" : "Paused"}
+                                  </span>
+                                  {totalTimeSlots > 0 && (
+                                    <span className="text-xs text-[var(--text-2)]">
+                                      {totalTimeSlots} slots
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex gap-1 ml-auto">
+                                  <button
+                                    onClick={() => handleToggleWatch(watch.id, watch.active)}
+                                    className={`px-2 py-1 text-xs rounded font-medium transition-colors ${
+                                      watch.active
+                                        ? "bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text)]"
+                                        : "bg-green-100 hover:bg-green-200 text-green-700"
+                                    }`}
+                                    title={watch.active ? "Pause watch" : "Activate watch"}
+                                  >
+                                    {watch.active ? "Pause" : "Activate"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const { color: _color, ...watchWithoutColor } = watch;
+                                      setEditingWatch(watchWithoutColor);
+                                    }}
+                                    className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded font-medium transition-colors"
+                                    title="Edit watch"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteWatch(watch.id)}
+                                    className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded font-medium transition-colors"
+                                    title="Delete watch"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+                })()}
               </div>
             )}
           </section>
@@ -1295,7 +1858,7 @@ function DashboardContent() {
             <div className="flex justify-between items-center mb-4">
               <div>
                 <h2 className="text-xl font-semibold">Notification Channels</h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                <p className="text-sm text-[var(--text-2)] mt-1">
                   Choose how you want to receive notifications when courts become
                   available.
                 </p>
@@ -1305,17 +1868,17 @@ function DashboardContent() {
                   setEditingChannel(null);
                   setShowChannelForm(true);
                 }}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
+                className="px-4 py-2 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 transition-colors text-sm"
               >
                 + Add Channel
               </button>
             </div>
 
             {loadingChannels ? (
-              <div className="p-4 text-center text-gray-500">Loading...</div>
+              <div className="p-4 text-center text-[var(--text-2)]">Loading...</div>
             ) : channels.length === 0 ? (
-              <div className="p-6 border border-dashed rounded-lg dark:border-gray-700 text-center">
-                <p className="text-gray-500 mb-4">
+              <div className="p-6 border border-dashed rounded-xl text-center">
+                <p className="text-[var(--text-2)] mb-4">
                   No notification channels configured.
                 </p>
                 <button
@@ -1323,7 +1886,7 @@ function DashboardContent() {
                     setEditingChannel(null);
                     setShowChannelForm(true);
                   }}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors text-sm"
+                  className="px-4 py-2 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 transition-colors text-sm"
                 >
                   Add Your First Channel
                 </button>
@@ -1333,10 +1896,10 @@ function DashboardContent() {
                 {channels.map((channel) => (
                   <div
                     key={channel.id}
-                    className={`p-4 border rounded-lg dark:border-gray-700 ${
+                    className={`p-4 border rounded-lg ${
                       channel.active
-                        ? "bg-white dark:bg-gray-800"
-                        : "bg-gray-50 dark:bg-gray-900 opacity-60"
+                        ? "bg-[var(--surface)]"
+                        : "bg-[var(--surface)] opacity-60"
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -1344,31 +1907,31 @@ function DashboardContent() {
                         <div
                           className={`w-10 h-10 rounded-full flex items-center justify-center ${
                             channel.type === "telegram"
-                              ? "bg-blue-100 dark:bg-blue-900"
+                              ? "bg-blue-100"
                               : channel.type === "email"
-                                ? "bg-purple-100 dark:bg-purple-900"
-                                : "bg-green-100 dark:bg-green-900"
+                                ? "bg-purple-100"
+                                : "bg-green-100"
                           }`}
                         >
                           {channel.type === "telegram" && (
-                            <span className="text-blue-600 dark:text-blue-400">
+                            <span className="text-blue-600">
                               T
                             </span>
                           )}
                           {channel.type === "email" && (
-                            <span className="text-purple-600 dark:text-purple-400">
+                            <span className="text-purple-600">
                               @
                             </span>
                           )}
                           {channel.type === "whatsapp" && (
-                            <span className="text-green-600 dark:text-green-400">
+                            <span className="text-green-600">
                               W
                             </span>
                           )}
                         </div>
                         <div>
                           <p className="font-medium capitalize">{channel.type}</p>
-                          <p className="text-sm text-gray-500">
+                          <p className="text-sm text-[var(--text-2)]">
                             {channel.destination}
                           </p>
                         </div>
@@ -1377,8 +1940,8 @@ function DashboardContent() {
                         <span
                           className={`text-xs px-2 py-0.5 rounded ${
                             channel.active
-                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                              ? "bg-[var(--green)]/10 text-[var(--green)]"
+                              : "bg-[var(--surface-2)] text-[var(--text-2)]"
                           }`}
                         >
                           {channel.active ? "Active" : "Paused"}
@@ -1387,21 +1950,21 @@ function DashboardContent() {
                           onClick={() => handleToggleChannel(channel.id, channel.active)}
                           className={`px-3 py-1 text-xs rounded ${
                             channel.active
-                              ? "bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600"
-                              : "bg-green-100 dark:bg-green-900 hover:bg-green-200 dark:hover:bg-green-800"
+                              ? "bg-[var(--surface-2)] hover:bg-[var(--surface-3)]"
+                              : "bg-green-100 hover:bg-green-200"
                           }`}
                         >
                           {channel.active ? "Pause" : "Activate"}
                         </button>
                         <button
                           onClick={() => setEditingChannel(channel)}
-                          className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900 hover:bg-blue-200 dark:hover:bg-blue-800 rounded"
+                          className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDeleteChannel(channel.id)}
-                          className="px-3 py-1 text-xs bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 rounded"
+                          className="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
                         >
                           Delete
                         </button>
@@ -1419,7 +1982,7 @@ function DashboardContent() {
       {activeTab === "admin" && isAuthenticated && isAdmin && (
         <div className="space-y-6">
           {/* Admin Sub-tabs */}
-          <div className="flex gap-2 border-b dark:border-gray-700">
+          <div className="flex gap-2 border-b">
             <button
               onClick={() => {
                 setAdminSubTab("overview");
@@ -1427,8 +1990,8 @@ function DashboardContent() {
               }}
               className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
                 adminSubTab === "overview"
-                  ? "border-green-600 text-green-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-[var(--green)] text-[var(--green)]"
+                  : "border-transparent text-[var(--text-3)] hover:text-[var(--text-2)]"
               }`}
             >
               Overview
@@ -1440,8 +2003,8 @@ function DashboardContent() {
               }}
               className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
                 adminSubTab === "users"
-                  ? "border-green-600 text-green-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-[var(--green)] text-[var(--green)]"
+                  : "border-transparent text-[var(--text-3)] hover:text-[var(--text-2)]"
               }`}
             >
               Users
@@ -1453,8 +2016,8 @@ function DashboardContent() {
               }}
               className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
                 adminSubTab === "requests"
-                  ? "border-green-600 text-green-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-[var(--green)] text-[var(--green)]"
+                  : "border-transparent text-[var(--text-3)] hover:text-[var(--text-2)]"
               }`}
             >
               Registration Requests
@@ -1466,8 +2029,8 @@ function DashboardContent() {
               }}
               className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
                 adminSubTab === "system"
-                  ? "border-green-600 text-green-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-[var(--green)] text-[var(--green)]"
+                  : "border-transparent text-[var(--text-3)] hover:text-[var(--text-2)]"
               }`}
             >
               System
@@ -1479,8 +2042,8 @@ function DashboardContent() {
               }}
               className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px cursor-pointer ${
                 adminSubTab === "database"
-                  ? "border-green-600 text-green-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
+                  ? "border-[var(--green)] text-[var(--green)]"
+                  : "border-transparent text-[var(--text-3)] hover:text-[var(--text-2)]"
               }`}
             >
               Database
@@ -1511,6 +2074,20 @@ function DashboardContent() {
         />
       )}
 
+      {/* Bulk Edit Modal */}
+      {bulkEditMode && (
+        <BulkEditWatchModal
+          selectedCount={selectedWatchIds.size}
+          onClose={() => {
+            setBulkEditMode(false);
+          }}
+          onSubmit={(dayTimes) => {
+            handleBulkEdit(dayTimes);
+          }}
+          timeSlots={TIME_SLOTS}
+        />
+      )}
+
       {/* Channel Form Modal */}
       {(showChannelForm || editingChannel) && (
         <ChannelFormModal
@@ -1525,7 +2102,8 @@ function DashboardContent() {
             : handleCreateChannel}
         />
       )}
-    </main>
+      </main>
+    </div>
   );
 }
 
@@ -1539,158 +2117,1115 @@ function WatchFormModal({
   watch: Watch | null;
   onClose: () => void;
   onSubmit: (data: {
-    venueSlug: string | null;
-    weekdayTimes: string[];
-    weekendTimes: string[];
+    venueSlugs: string[];
+    dayTimes: {
+      monday: string[];
+      tuesday: string[];
+      wednesday: string[];
+      thursday: string[];
+      friday: string[];
+      saturday: string[];
+      sunday: string[];
+    };
   }) => void;
   timeSlots: string[];
 }) {
-  const [venueSlug, setVenueSlug] = useState<string | null>(
-    watch?.venueSlug || null
-  );
-  const [weekdayTimes, setWeekdayTimes] = useState<string[]>(
-    watch?.weekdayTimes || []
-  );
-  const [weekendTimes, setWeekendTimes] = useState<string[]>(
-    watch?.weekendTimes || []
-  );
-  const [submitting, setSubmitting] = useState(false);
+  const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+  const DAY_LABELS = {
+    monday: 'Monday',
+    tuesday: 'Tuesday',
+    wednesday: 'Wednesday',
+    thursday: 'Thursday',
+    friday: 'Friday',
+    saturday: 'Saturday',
+    sunday: 'Sunday',
+  };
+  const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
+  const WEEKENDS = ['saturday', 'sunday'] as const;
 
-  const toggleTime = (
-    time: string,
-    times: string[],
-    setTimes: (times: string[]) => void
-  ) => {
-    if (times.includes(time)) {
-      setTimes(times.filter((t) => t !== time));
-    } else {
-      setTimes([...times, time].sort());
+  // For editing, we only edit one watch at a time (single venue)
+  const [selectedVenues, setSelectedVenues] = useState<string[]>(
+    watch?.venueSlug ? [watch.venueSlug] : []
+  );
+  const [venueDropdownOpen, setVenueDropdownOpen] = useState(false);
+  const [venueSearch, setVenueSearch] = useState("");
+  const [dayViewTab, setDayViewTab] = useState<'all' | 'weekdays' | 'weekends'>('all');
+  
+  const [dayTimes, setDayTimes] = useState<{
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }>(
+    watch?.dayTimes || {
+      monday: [],
+      tuesday: [],
+      wednesday: [],
+      thursday: [],
+      friday: [],
+      saturday: [],
+      sunday: [],
     }
+  );
+  
+  // Track which days are enabled (have times selected)
+  const [enabledDays, setEnabledDays] = useState<Set<string>>(() => {
+    const enabled = new Set<string>();
+    if (watch?.dayTimes) {
+      DAYS.forEach(day => {
+        if (watch.dayTimes[day] && watch.dayTimes[day].length > 0) {
+          enabled.add(day);
+        }
+      });
+    }
+    return enabled;
+  });
+  
+  const [submitting, setSubmitting] = useState(false);
+  
+  const toggleDay = (day: typeof DAYS[number]) => {
+    setEnabledDays(prev => {
+      const next = new Set(prev);
+      if (next.has(day)) {
+        next.delete(day);
+        // Clear times when disabling day
+        setDayTimes(prevTimes => ({ ...prevTimes, [day]: [] }));
+      } else {
+        next.add(day);
+      }
+      return next;
+    });
+  };
+
+  const toggleTime = (day: typeof DAYS[number], time: string) => {
+    setDayTimes(prev => {
+      const newTimes = prev[day].includes(time)
+        ? prev[day].filter(t => t !== time)
+        : [...prev[day], time].sort();
+      
+      // Auto-enable day if times are added, auto-disable if all times removed
+      setEnabledDays(prevEnabled => {
+        const next = new Set(prevEnabled);
+        if (newTimes.length > 0) {
+          next.add(day);
+        } else {
+          next.delete(day);
+        }
+        return next;
+      });
+      
+      return {
+        ...prev,
+        [day]: newTimes,
+      };
+    });
+  };
+
+  // Get days to display based on active tab
+  const getDaysToDisplay = () => {
+    switch (dayViewTab) {
+      case 'weekdays':
+        return WEEKDAYS;
+      case 'weekends':
+        return WEEKENDS;
+      default:
+        return DAYS;
+    }
+  };
+
+  // Quick selection helpers
+  const selectTimeRange = (day: typeof DAYS[number], startTime: string, endTime: string) => {
+    const startIdx = timeSlots.indexOf(startTime);
+    const endIdx = timeSlots.indexOf(endTime);
+    if (startIdx === -1 || endIdx === -1) return;
+    
+    const range = timeSlots.slice(startIdx, endIdx + 1);
+    setDayTimes(prev => ({
+      ...prev,
+      [day]: [...new Set([...prev[day], ...range])].sort(),
+    }));
+  };
+
+  const applyToDays = (days: readonly string[], times: string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [...times].sort();
+      });
+      return updated;
+    });
+  };
+
+  const clearDays = (days: readonly string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [];
+      });
+      return updated;
+    });
+  };
+
+  // Preset templates
+  const applyPreset = (preset: 'evening' | 'morning' | 'afternoon' | 'all-day') => {
+    let times: string[] = [];
+    switch (preset) {
+      case 'evening':
+        // Only include 6pm, 7pm, 8pm, 9pm, 10pm (exclude 12pm and 1pm-5pm)
+        times = timeSlots.filter(t => {
+          return t === '6pm' || t === '7pm' || t === '8pm' || t === '9pm' || t === '10pm';
+        });
+        break;
+      case 'morning':
+        times = timeSlots.filter(t => {
+          const hour = parseInt(t.replace(/[^0-9]/g, ''));
+          const isAM = t.includes('am');
+          return isAM && hour >= 7 && hour <= 12;
+        });
+        break;
+      case 'afternoon':
+        // Include 12pm and 1pm-5pm
+        times = timeSlots.filter(t => {
+          return t === '12pm' || t === '1pm' || t === '2pm' || t === '3pm' || t === '4pm' || t === '5pm';
+        });
+        break;
+      case 'all-day':
+        times = [...timeSlots];
+        break;
+    }
+    applyToDays(DAYS, times);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (weekdayTimes.length === 0 && weekendTimes.length === 0) {
-      alert("Please select at least one time slot for weekdays or weekends");
+    
+    // Validate at least one venue selected
+    if (selectedVenues.length === 0) {
+      alert("Please select at least one venue");
+      return;
+    }
+
+    // Validate at least one time slot selected across all days
+    const hasAnyTime = DAYS.some(day => dayTimes[day].length > 0);
+    if (!hasAnyTime) {
+      alert("Please select at least one time slot for any day");
       return;
     }
 
     setSubmitting(true);
     try {
       await onSubmit({
-        venueSlug,
-        weekdayTimes,
-        weekendTimes,
+        venueSlugs: selectedVenues,
+        dayTimes,
       });
     } finally {
       setSubmitting(false);
     }
   };
 
+  const filteredVenues = VENUES.filter(venue =>
+    venue.name.toLowerCase().includes(venueSearch.toLowerCase())
+  );
+
+  const removeVenue = (slug: string) => {
+    setSelectedVenues(prev => prev.filter(v => v !== slug));
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b dark:border-gray-700">
-          <h2 className="text-xl font-semibold">
-            {watch ? "Edit Watch" : "Create New Watch"}
-          </h2>
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--surface-2)] rounded-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+        <div className="p-6 border-b border-[var(--border)]">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold">
+                {watch ? "Edit Watch" : "Create New Watch"}
+              </h2>
+              {!watch && (
+                <p className="mt-1 text-sm text-[var(--text-2)]">
+                  Select venues and times to get notified when slots become available
+                </p>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              className="text-[var(--text-3)] hover:text-[var(--text-2)]"
+              disabled={submitting}
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Venue Selection */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Venue</label>
-            <select
-              value={venueSlug || ""}
-              onChange={(e) =>
-                setVenueSlug(e.target.value || null)
-              }
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
-            >
-              <option value="">All Venues</option>
-              {VENUES.map((venue) => (
-                <option key={venue.slug} value={venue.slug}>
-                  {venue.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Weekday Times */}
+          {/* Venue Selection - Enhanced with chips */}
           <div>
             <label className="block text-sm font-medium mb-2">
-              Weekday Times (Mon-Fri)
+              Select Venues {!watch && <span className="text-[var(--text-2)] font-normal">(select multiple)</span>}
             </label>
-            <div className="grid grid-cols-4 gap-2">
-              {timeSlots.map((time) => (
-                <button
-                  key={time}
-                  type="button"
-                  onClick={() =>
-                    toggleTime(time, weekdayTimes, setWeekdayTimes)
-                  }
-                  className={`p-2 rounded text-sm border transition-colors cursor-pointer ${
-                    weekdayTimes.includes(time)
-                      ? "bg-green-600 text-white border-green-600"
-                      : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+            
+            {/* Selected venues as chips */}
+            {selectedVenues.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedVenues.map((slug) => {
+                  const venue = VENUES.find(v => v.slug === slug);
+                  return (
+                    <span
+                      key={slug}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-[var(--green)]/10 text-[var(--green)] rounded-full text-sm"
+                    >
+                      {venue?.name}
+                      {!watch && (
+                        <button
+                          type="button"
+                          onClick={() => removeVenue(slug)}
+                          className="ml-1 hover:text-green-600"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!watch) setVenueDropdownOpen(!venueDropdownOpen);
+                }}
+                className={`w-full p-3 border-2 rounded-lg text-left flex items-center justify-between transition-colors ${
+                  watch 
+                    ? 'bg-[var(--surface-2)] border-[var(--border)] cursor-not-allowed opacity-60'
+                    : selectedVenues.length > 0
+                    ? 'bg-green-50 border-green-300 hover:bg-green-100 cursor-pointer'
+                    : 'bg-[var(--surface)] border-[var(--border)] hover:border-green-400 cursor-pointer'
+                }`}
+                disabled={!!watch}
+              >
+                <span className="text-sm text-[var(--text)]">
+                  {selectedVenues.length === 0
+                    ? "Click to select venues..."
+                    : selectedVenues.length === 1
+                    ? VENUES.find((v) => v.slug === selectedVenues[0])?.name || "Select venues..."
+                    : `${selectedVenues.length} venues selected`}
+                </span>
+                <svg
+                  className={`w-5 h-5 text-[var(--text-2)] transition-transform ${
+                    venueDropdownOpen ? "rotate-180" : ""
                   }`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  {time}
-                </button>
-              ))}
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              {venueDropdownOpen && !watch && (
+                <>
+                  <div
+                    className="fixed inset-0"
+                    style={{ zIndex: 55 }}
+                    onClick={() => {
+                      setVenueDropdownOpen(false);
+                      setVenueSearch("");
+                    }}
+                  />
+                  <div 
+                    className="absolute w-full mt-1 bg-[var(--surface)] border-2 border-[var(--border)] rounded-lg shadow-xl max-h-80 overflow-hidden flex flex-col"
+                    style={{ zIndex: 60 }}
+                  >
+                    {/* Search input */}
+                    <div className="p-2 border-b">
+                      <input
+                        type="text"
+                        placeholder="Search venues..."
+                        value={venueSearch}
+                        onChange={(e) => setVenueSearch(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full px-3 py-2 border border-[var(--border)] rounded-lg text-sm focus:outline-none focus:outline-none focus:border-[var(--green)] focus:ring-1 focus:ring-[var(--green-border)]"
+                      />
+                    </div>
+                    
+                    <div className="overflow-y-auto max-h-64">
+                      <div className="p-2">
+                        {/* Select All Checkbox */}
+                        <label
+                          className="flex items-center gap-2 p-2 rounded hover:bg-[var(--surface)] cursor-pointer border-b border-[var(--border)] mb-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filteredVenues.length > 0 && filteredVenues.every(v => selectedVenues.includes(v.slug))}
+                            ref={(input) => {
+                              if (input) {
+                                const selectedCount = filteredVenues.filter(v => selectedVenues.includes(v.slug)).length;
+                                input.indeterminate = selectedCount > 0 && selectedCount < filteredVenues.length;
+                              }
+                            }}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const newVenues = [...new Set([...selectedVenues, ...filteredVenues.map(v => v.slug)])];
+                                setSelectedVenues(newVenues);
+                              } else {
+                                setSelectedVenues(selectedVenues.filter(v => !filteredVenues.some(fv => fv.slug === v)));
+                              }
+                            }}
+                            className="w-4 h-4 text-green-600 border-[var(--border)] rounded focus:ring-green-500"
+                          />
+                          <span className="text-sm font-medium text-[var(--text)]">
+                            {venueSearch ? `All (${filteredVenues.length})` : "All Venues"}
+                          </span>
+                        </label>
+
+                        {filteredVenues.length === 0 ? (
+                          <div className="p-4 text-center text-sm text-[var(--text-2)]">
+                            No venues found
+                          </div>
+                        ) : (
+                          filteredVenues.map((venue) => {
+                            const isSelected = selectedVenues.includes(venue.slug);
+                            return (
+                              <label
+                                key={venue.slug}
+                                className="flex items-center gap-2 p-2 rounded hover:bg-[var(--surface)] cursor-pointer"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedVenues([...selectedVenues, venue.slug]);
+                                    } else {
+                                      setSelectedVenues(selectedVenues.filter(v => v !== venue.slug));
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-green-600 border-[var(--border)] rounded focus:ring-green-500"
+                                />
+                                <span className="text-sm text-[var(--text)]">
+                                  {venue.name}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            {weekdayTimes.length > 0 && (
-              <p className="mt-2 text-sm text-gray-500">
-                Selected: {weekdayTimes.join(", ")}
+            {watch && (
+              <p className="mt-2 text-xs text-[var(--text-2)]">
+                Venue cannot be changed when editing. Delete and create new watches to change venues.
               </p>
             )}
           </div>
 
-          {/* Weekend Times */}
+          {/* Quick Presets */}
           <div>
-            <label className="block text-sm font-medium mb-2">
-              Weekend Times (Sat-Sun)
-            </label>
-            <div className="grid grid-cols-4 gap-2">
-              {timeSlots.map((time) => (
+            <label className="block text-sm font-medium mb-2">Quick Presets</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyPreset('evening')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                🌆 Evening (6pm-10pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('morning')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                🌅 Morning (7am-12pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('afternoon')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                ☀️ Afternoon (12pm-5pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('all-day')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                🕐 All Day
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Day Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Quick Day Selection</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const weekdaysTimes = WEEKDAYS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekdaysTimes.length > 0 
+                    ? [...new Set(weekdaysTimes)].sort()
+                    : ['6pm', '7pm', '8pm'];
+                  applyToDays(WEEKDAYS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                Apply to Weekdays
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const weekendTimes = WEEKENDS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekendTimes.length > 0 
+                    ? [...new Set(weekendTimes)].sort()
+                    : ['9am', '10am', '11am', '12pm', '1pm', '2pm'];
+                  applyToDays(WEEKENDS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-purple-50 text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-100 transition-colors"
+              >
+                Apply to Weekends
+              </button>
+              <button
+                type="button"
+                onClick={() => clearDays(DAYS)}
+                className="px-3 py-1.5 text-sm bg-red-50 text-red-700 border border-red-300 rounded-lg hover:bg-red-100 transition-colors"
+              >
+                Clear All Days
+              </button>
+            </div>
+          </div>
+
+          {/* Day Time Selectors - Tabbed Interface */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <label className="block text-sm font-medium">
+                Select times for each day
+              </label>
+              {/* Day View Tabs */}
+              <div className="flex gap-1 bg-[var(--surface-2)] p-1 rounded-lg">
                 <button
-                  key={time}
                   type="button"
-                  onClick={() =>
-                    toggleTime(time, weekendTimes, setWeekendTimes)
-                  }
-                  className={`p-2 rounded text-sm border transition-colors cursor-pointer ${
-                    weekendTimes.includes(time)
-                      ? "bg-green-600 text-white border-green-600"
-                      : "bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
+                  onClick={() => setDayViewTab('all')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'all'
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text-2)] hover:text-[var(--text)]'
                   }`}
                 >
-                  {time}
+                  All Days
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekdays')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekdays'
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  Weekdays
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekends')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekends'
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  Weekends
+                </button>
+              </div>
             </div>
-            {weekendTimes.length > 0 && (
-              <p className="mt-2 text-sm text-gray-500">
-                Selected: {weekendTimes.join(", ")}
-              </p>
-            )}
+            
+            {/* Days Grid - 2 columns for compact view */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {getDaysToDisplay().map((day) => {
+                const selectedCount = dayTimes[day].length;
+                const isEnabled = enabledDays.has(day);
+                return (
+                  <div key={day} className={`border-2 rounded-lg p-4 transition-all ${
+                    isEnabled 
+                      ? 'bg-[var(--surface)] hover:border-green-400' 
+                      : 'bg-[var(--surface)] border-[var(--border)] opacity-60'
+                  }`}>
+                    {/* Day Header with Toggle */}
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b">
+                      <div className="flex items-center gap-2 flex-1">
+                        {/* Day Toggle */}
+                        <button
+                          type="button"
+                          onClick={() => toggleDay(day)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:outline-none focus:border-[var(--green)] focus:ring-1 focus:ring-[var(--green-border)]  ${
+                            isEnabled
+                              ? 'bg-[var(--green)]'
+                              : 'bg-[var(--surface-3)]'
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-[var(--surface)] transition-transform ${
+                              isEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                        <div className="flex items-center gap-2">
+                          <h3 className={`text-sm font-semibold ${isEnabled ? '' : 'text-[var(--text-3)]'}`}>
+                            {DAY_LABELS[day]}
+                          </h3>
+                          {selectedCount > 0 && isEnabled && (
+                            <span className="px-2 py-0.5 bg-[var(--green)]/10 text-[var(--green)] rounded-full text-xs font-medium">
+                              {selectedCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {selectedCount > 0 && isEnabled && (
+                        <button
+                          type="button"
+                          onClick={() => setDayTimes(prev => ({ ...prev, [day]: [] }))}
+                          className="text-xs text-red-600 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    
+                    {/* Only show time selection if day is enabled */}
+                    {isEnabled && (
+                      <>
+                        {/* Quick time range buttons */}
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          <button
+                            type="button"
+                            onClick={() => selectTimeRange(day, '6pm', '10pm')}
+                            className="px-2 py-1 text-xs border border-[var(--border)] rounded hover:bg-[var(--surface)] transition-colors"
+                          >
+                            + Evening
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => selectTimeRange(day, '7am', '12pm')}
+                            className="px-2 py-1 text-xs border border-[var(--border)] rounded hover:bg-[var(--surface)] transition-colors"
+                          >
+                            + Morning
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => selectTimeRange(day, '12pm', '5pm')}
+                            className="px-2 py-1 text-xs border border-[var(--border)] rounded hover:bg-[var(--surface)] transition-colors"
+                          >
+                            + Afternoon
+                          </button>
+                        </div>
+                        
+                        {/* Time slot grid - more compact */}
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {timeSlots.map((time) => (
+                            <button
+                              key={time}
+                              type="button"
+                              onClick={() => toggleTime(day, time)}
+                              className={`p-1.5 rounded text-xs font-medium border-2 transition-all cursor-pointer ${
+                                dayTimes[day].includes(time)
+                                  ? "bg-[var(--green)] text-black border-[var(--green)] shadow-sm"
+                                  : "bg-[var(--surface)] border-[var(--border)] hover:bg-green-50 hover:border-green-400"
+                              }`}
+                            >
+                              {time}
+                            </button>
+                          ))}
+                        </div>
+                        
+                        {dayTimes[day].length > 0 && (
+                          <p className="mt-2 text-xs text-[var(--text-2)] line-clamp-1">
+                            <span className="font-medium">Selected:</span> {dayTimes[day].join(", ")}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    {!isEnabled && (
+                      <p className="text-xs text-[var(--text-3)] italic text-center py-2">
+                        Toggle to enable this day
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start gap-2">
+              <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div className="text-sm text-blue-800">
+                <p className="font-medium mb-1">Summary</p>
+                <p>
+                  {selectedVenues.length === 0 ? (
+                    "Select at least one venue"
+                  ) : (
+                    <>
+                      Creating <strong>{selectedVenues.length}</strong> watch{selectedVenues.length > 1 ? 'es' : ''} for{' '}
+                      <strong>{selectedVenues.length === 1 ? VENUES.find(v => v.slug === selectedVenues[0])?.name : `${selectedVenues.length} venues`}</strong>
+                      {DAYS.some(day => dayTimes[day].length > 0) && (
+                        <> with time preferences for {DAYS.filter(day => dayTimes[day].length > 0).length} day{DAYS.filter(day => dayTimes[day].length > 0).length > 1 ? 's' : ''}</>
+                      )}
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Form Actions */}
-          <div className="flex gap-3 justify-end pt-4 border-t dark:border-gray-700">
+          <div className="flex gap-3 justify-end pt-4 border-t">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              className="px-5 py-2.5 border-2 border-[var(--border)] rounded-lg hover:bg-[var(--surface)] font-medium transition-colors"
               disabled={submitting}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              className="px-5 py-2.5 bg-[var(--green)] text-black rounded-lg hover:bg-green-400 disabled:opacity-50 font-medium shadow-md hover:shadow-lg transition-all disabled:cursor-not-allowed"
+              disabled={submitting || selectedVenues.length === 0}
+            >
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Saving...
+                </span>
+              ) : watch ? (
+                "Update Watch"
+              ) : (
+                `Create ${selectedVenues.length > 1 ? `${selectedVenues.length} ` : ''}Watch${selectedVenues.length > 1 ? 'es' : ''}`
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Bulk Edit Watch Modal Component
+function BulkEditWatchModal({
+  selectedCount,
+  onClose,
+  onSubmit,
+  timeSlots,
+}: {
+  selectedCount: number;
+  onClose: () => void;
+  onSubmit: (dayTimes: {
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }) => void;
+  timeSlots: string[];
+}) {
+  const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+  const DAY_LABELS = {
+    monday: 'Monday',
+    tuesday: 'Tuesday',
+    wednesday: 'Wednesday',
+    thursday: 'Thursday',
+    friday: 'Friday',
+    saturday: 'Saturday',
+    sunday: 'Sunday',
+  };
+  const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
+  const WEEKENDS = ['saturday', 'sunday'] as const;
+
+  const [dayTimes, setDayTimes] = useState<{
+    monday: string[];
+    tuesday: string[];
+    wednesday: string[];
+    thursday: string[];
+    friday: string[];
+    saturday: string[];
+    sunday: string[];
+  }>({
+    monday: [],
+    tuesday: [],
+    wednesday: [],
+    thursday: [],
+    friday: [],
+    saturday: [],
+    sunday: [],
+  });
+  const [dayViewTab, setDayViewTab] = useState<'all' | 'weekdays' | 'weekends'>('all');
+  const [submitting, setSubmitting] = useState(false);
+
+  const toggleTime = (day: typeof DAYS[number], time: string) => {
+    setDayTimes(prev => ({
+      ...prev,
+      [day]: prev[day].includes(time)
+        ? prev[day].filter(t => t !== time)
+        : [...prev[day], time].sort(),
+    }));
+  };
+
+  const selectTimeRange = (day: typeof DAYS[number], startTime: string, endTime: string) => {
+    const startIdx = timeSlots.indexOf(startTime);
+    const endIdx = timeSlots.indexOf(endTime);
+    if (startIdx === -1 || endIdx === -1) return;
+    
+    const range = timeSlots.slice(startIdx, endIdx + 1);
+    setDayTimes(prev => ({
+      ...prev,
+      [day]: [...new Set([...prev[day], ...range])].sort(),
+    }));
+  };
+
+  const applyToDays = (days: readonly string[], times: string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [...times].sort();
+      });
+      return updated;
+    });
+  };
+
+  const clearDays = (days: readonly string[]) => {
+    setDayTimes(prev => {
+      const updated = { ...prev };
+      days.forEach(day => {
+        updated[day as typeof DAYS[number]] = [];
+      });
+      return updated;
+    });
+  };
+
+  const applyPreset = (preset: 'evening' | 'morning' | 'afternoon' | 'all-day') => {
+    let times: string[] = [];
+    switch (preset) {
+      case 'evening':
+        times = timeSlots.filter(t => {
+          return t === '6pm' || t === '7pm' || t === '8pm' || t === '9pm' || t === '10pm';
+        });
+        break;
+      case 'morning':
+        times = timeSlots.filter(t => {
+          const hour = parseInt(t.replace(/[^0-9]/g, ''));
+          const isAM = t.includes('am');
+          return isAM && hour >= 7 && hour <= 12;
+        });
+        break;
+      case 'afternoon':
+        times = timeSlots.filter(t => {
+          return t === '12pm' || t === '1pm' || t === '2pm' || t === '3pm' || t === '4pm' || t === '5pm';
+        });
+        break;
+      case 'all-day':
+        times = [...timeSlots];
+        break;
+    }
+    applyToDays(DAYS, times);
+  };
+
+  const getDaysToDisplay = () => {
+    switch (dayViewTab) {
+      case 'weekdays':
+        return WEEKDAYS;
+      case 'weekends':
+        return WEEKENDS;
+      default:
+        return DAYS;
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const hasAnyTime = DAYS.some(day => dayTimes[day].length > 0);
+    if (!hasAnyTime) {
+      alert("Please select at least one time slot for any day");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit(dayTimes);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--surface-2)] rounded-xl max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-xl">
+        <div className="p-6 border-b border-[var(--border)]">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold">Bulk Edit Watches</h2>
+              <p className="mt-1 text-sm text-[var(--text-2)]">
+                Apply the same time preferences to {selectedCount} selected watch{selectedCount > 1 ? 'es' : ''}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-[var(--text-3)] hover:text-[var(--text-2)]"
               disabled={submitting}
             >
-              {submitting ? "Saving..." : watch ? "Update Watch" : "Create Watch"}
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Quick Presets */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Quick Presets</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => applyPreset('evening')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                🌆 Evening (6pm-10pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('morning')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                🌅 Morning (7am-12pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('afternoon')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                ☀️ Afternoon (12pm-5pm)
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('all-day')}
+                className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--surface)] transition-colors"
+              >
+                🕐 All Day
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Day Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Quick Day Selection</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const weekdaysTimes = WEEKDAYS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekdaysTimes.length > 0 
+                    ? [...new Set(weekdaysTimes)].sort()
+                    : ['6pm', '7pm', '8pm'];
+                  applyToDays(WEEKDAYS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-100 transition-colors"
+              >
+                Apply to Weekdays
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const weekendTimes = WEEKENDS.flatMap(day => dayTimes[day]);
+                  const mostCommonTimes = weekendTimes.length > 0 
+                    ? [...new Set(weekendTimes)].sort()
+                    : ['9am', '10am', '11am', '12pm', '1pm', '2pm'];
+                  applyToDays(WEEKENDS, mostCommonTimes);
+                }}
+                className="px-3 py-1.5 text-sm bg-purple-50 text-purple-700 border border-purple-300 rounded-lg hover:bg-purple-100 transition-colors"
+              >
+                Apply to Weekends
+              </button>
+              <button
+                type="button"
+                onClick={() => clearDays(DAYS)}
+                className="px-3 py-1.5 text-sm bg-red-50 text-red-700 border border-red-300 rounded-lg hover:bg-red-100 transition-colors"
+              >
+                Clear All Days
+              </button>
+            </div>
+          </div>
+
+          {/* Day Time Selectors - Tabbed Interface */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <label className="block text-sm font-medium">
+                Select times for each day
+              </label>
+              <div className="flex gap-1 bg-[var(--surface-2)] p-1 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('all')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'all'
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  All Days
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekdays')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekdays'
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  Weekdays
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayViewTab('weekends')}
+                  className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                    dayViewTab === 'weekends'
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  Weekends
+                </button>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {getDaysToDisplay().map((day) => {
+                const selectedCount = dayTimes[day].length;
+                return (
+                  <div key={day} className="border-2 rounded-lg p-4 bg-[var(--surface)] transition-all hover:border-green-400">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold">{DAY_LABELS[day]}</h3>
+                        {selectedCount > 0 && (
+                          <span className="px-2 py-0.5 bg-[var(--green)]/10 text-[var(--green)] rounded-full text-xs font-medium">
+                            {selectedCount}
+                          </span>
+                        )}
+                      </div>
+                      {selectedCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setDayTimes(prev => ({ ...prev, [day]: [] }))}
+                          className="text-xs text-red-600 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      <button
+                        type="button"
+                        onClick={() => selectTimeRange(day, '6pm', '10pm')}
+                        className="px-2 py-1 text-xs border border-[var(--border)] rounded hover:bg-[var(--surface)] transition-colors"
+                      >
+                        + Evening
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectTimeRange(day, '7am', '12pm')}
+                        className="px-2 py-1 text-xs border border-[var(--border)] rounded hover:bg-[var(--surface)] transition-colors"
+                      >
+                        + Morning
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectTimeRange(day, '12pm', '5pm')}
+                        className="px-2 py-1 text-xs border border-[var(--border)] rounded hover:bg-[var(--surface)] transition-colors"
+                      >
+                        + Afternoon
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {timeSlots.map((time) => (
+                        <button
+                          key={time}
+                          type="button"
+                          onClick={() => toggleTime(day, time)}
+                          className={`p-1.5 rounded text-xs font-medium border-2 transition-all cursor-pointer ${
+                            dayTimes[day].includes(time)
+                              ? "bg-[var(--green)] text-black border-[var(--green)] shadow-sm"
+                              : "bg-[var(--surface)] border-[var(--border)] hover:bg-green-50 hover:border-green-400"
+                          }`}
+                        >
+                          {time}
+                        </button>
+                      ))}
+                    </div>
+                    
+                    {dayTimes[day].length > 0 && (
+                      <p className="mt-2 text-xs text-[var(--text-2)] line-clamp-1">
+                        <span className="font-medium">Selected:</span> {dayTimes[day].join(", ")}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div className="flex gap-3 justify-end pt-4 border-t">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2.5 border-2 border-[var(--border)] rounded-lg hover:bg-[var(--surface)] font-medium transition-colors"
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-[var(--green)] text-black rounded-lg hover:bg-green-400 disabled:opacity-50 font-medium shadow-md hover:shadow-lg transition-all disabled:cursor-not-allowed"
+              disabled={submitting}
+            >
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Updating...
+                </span>
+              ) : (
+                `Apply to ${selectedCount} Watch${selectedCount > 1 ? 'es' : ''}`
+              )}
             </button>
           </div>
         </form>
@@ -1733,9 +3268,9 @@ function ChannelFormModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full">
-        <div className="p-6 border-b dark:border-gray-700">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--surface-2)] rounded-xl max-w-md w-full">
+        <div className="p-6 border-b border-[var(--border)]">
           <h2 className="text-xl font-semibold">
             {channel ? "Edit Channel" : "Add Notification Channel"}
           </h2>
@@ -1752,7 +3287,7 @@ function ChannelFormModal({
                   setDestination(userEmail);
                 }
               }}
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
               disabled={!!channel}
             >
               <option value="email">Email</option>
@@ -1780,21 +3315,21 @@ function ChannelFormModal({
                     ? "123456789"
                     : "+1234567890"
               }
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
               required
             />
             {type === "telegram" && (
-              <div className="mt-2 space-y-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                <p className="text-xs font-medium text-blue-900 dark:text-blue-200 mb-2">
+              <div className="mt-2 space-y-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs font-medium text-blue-900 mb-2">
                   How to get your Telegram Chat ID:
                 </p>
-                <ol className="text-xs text-blue-800 dark:text-blue-300 space-y-1.5 list-decimal list-inside">
+                <ol className="text-xs text-blue-800 space-y-1.5 list-decimal list-inside">
                   <li>
                     <a
                       href="https://t.me/MvgMonitorBot"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                      className="text-blue-600 hover:underline font-medium"
                     >
                       Click here to open @MvgMonitorBot
                     </a>
@@ -1807,7 +3342,7 @@ function ChannelFormModal({
                   href="https://t.me/MvgMonitorBot"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-block mt-2 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors font-medium"
+                  className="inline-block mt-2 px-4 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-700 transition-colors font-medium"
                 >
                   Open @MvgMonitorBot
                 </a>
@@ -1816,18 +3351,18 @@ function ChannelFormModal({
           </div>
 
           {/* Form Actions */}
-          <div className="flex gap-3 justify-end pt-4 border-t dark:border-gray-700">
+          <div className="flex gap-3 justify-end pt-4 border-t">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--surface)]"
               disabled={submitting}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[var(--green)] text-black rounded-lg hover:bg-green-400 disabled:opacity-50"
               disabled={submitting}
             >
               {submitting
@@ -1872,7 +3407,7 @@ function AdminOverview({ setAdminSubTab, router }: { setAdminSubTab: (tab: "over
   };
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading...</div>;
+    return <div className="p-4 text-center text-[var(--text-2)]">Loading...</div>;
   }
 
   return (
@@ -1881,64 +3416,64 @@ function AdminOverview({ setAdminSubTab, router }: { setAdminSubTab: (tab: "over
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <button
           onClick={() => navigateTo("users")}
-          className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4 hover:shadow-lg transition-shadow text-left cursor-pointer"
+          className="bg-[var(--surface)] rounded-lg border p-4 hover:shadow-lg transition-shadow text-left cursor-pointer"
         >
           <div className="text-2xl font-bold mb-1">{stats?.totalUsers || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total Users</div>
-          <div className="text-xs text-gray-500 mt-1">{stats?.allowedUsers || 0} allowed</div>
+          <div className="text-sm text-[var(--text-2)]">Total Users</div>
+          <div className="text-xs text-[var(--text-2)] mt-1">{stats?.allowedUsers || 0} allowed</div>
         </button>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{stats?.activeWatches || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Active Watches</div>
-          <div className="text-xs text-gray-500 mt-1">{stats?.totalWatches || 0} total</div>
+          <div className="text-sm text-[var(--text-2)]">Active Watches</div>
+          <div className="text-xs text-[var(--text-2)] mt-1">{stats?.totalWatches || 0} total</div>
         </div>
         <button
           onClick={() => navigateTo("requests")}
-          className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4 hover:shadow-lg transition-shadow text-left cursor-pointer"
+          className="bg-[var(--surface)] rounded-lg border p-4 hover:shadow-lg transition-shadow text-left cursor-pointer"
         >
           <div className="text-2xl font-bold mb-1">{stats?.pendingRequests || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Pending Requests</div>
-          <div className="text-xs text-gray-500 mt-1">Awaiting approval</div>
+          <div className="text-sm text-[var(--text-2)]">Pending Requests</div>
+          <div className="text-xs text-[var(--text-2)] mt-1">Awaiting approval</div>
         </button>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{stats?.totalChannels || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Notification Channels</div>
-          <div className="text-xs text-gray-500 mt-1">Active channels</div>
+          <div className="text-sm text-[var(--text-2)]">Notification Channels</div>
+          <div className="text-xs text-[var(--text-2)] mt-1">Active channels</div>
         </div>
         <button
           onClick={() => navigateTo("system")}
-          className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4 hover:shadow-lg transition-shadow text-left cursor-pointer"
+          className="bg-[var(--surface)] rounded-lg border p-4 hover:shadow-lg transition-shadow text-left cursor-pointer"
         >
           <div className="text-2xl font-bold mb-1">{stats?.totalSlots || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total Slots</div>
-          <div className="text-xs text-gray-500 mt-1">{stats?.totalVenues || 0} venues</div>
+          <div className="text-sm text-[var(--text-2)]">Total Slots</div>
+          <div className="text-xs text-[var(--text-2)] mt-1">{stats?.totalVenues || 0} venues</div>
         </button>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{stats?.totalNotifications || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Notifications Sent</div>
-          <div className="text-xs text-gray-500 mt-1">All time</div>
+          <div className="text-sm text-[var(--text-2)]">Notifications Sent</div>
+          <div className="text-xs text-[var(--text-2)] mt-1">All time</div>
         </div>
       </div>
 
       {/* Recent Notifications */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <h2 className="text-lg font-semibold mb-4">Recent Notifications</h2>
         {recentNotifications.length > 0 ? (
           <div className="space-y-2">
             {recentNotifications.map((notification) => (
               <div
                 key={notification.id}
-                className="flex items-center justify-between py-2 border-b dark:border-gray-700 last:border-0"
+                className="flex items-center justify-between py-2 border-b last:border-0"
               >
                 <span className="text-sm">{notification.slotKey}</span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-[var(--text-2)]">
                   {new Date(notification.sentAt).toLocaleString()}
                 </span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-gray-500 text-sm">No recent notifications</p>
+          <p className="text-[var(--text-2)] text-sm">No recent notifications</p>
         )}
       </div>
     </div>
@@ -2084,7 +3619,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
   );
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading...</div>;
+    return <div className="p-4 text-center text-[var(--text-2)]">Loading...</div>;
   }
 
   return (
@@ -2096,58 +3631,58 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
           placeholder="Search by email or name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 mr-4"
+          className="flex-1 p-3 border border-[var(--border)] rounded-lg bg-[var(--surface)] mr-4"
         />
         <button
           onClick={() => setShowAddUserForm(true)}
-          className="px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors whitespace-nowrap"
+          className="px-4 py-3 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 transition-colors whitespace-nowrap"
         >
           + Add User
         </button>
       </div>
 
       {/* Users Table */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 overflow-hidden">
+      <div className="bg-[var(--surface)] rounded-lg border overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-900">
+            <thead className="bg-[var(--surface)]">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-2)] uppercase">
                   User
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-2)] uppercase">
                   Status
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-2)] uppercase">
                   Watches
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-2)] uppercase">
                   Channels
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-2)] uppercase">
                   Created
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                <th className="px-4 py-3 text-right text-xs font-medium text-[var(--text-2)] uppercase">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y dark:divide-gray-700">
+            <tbody className="divide-y">
               {filteredUsers.map((user) => (
                 <Fragment key={user.id}>
-                  <tr className="hover:bg-gray-50 dark:hover:bg-gray-900">
+                  <tr className="hover:bg-[var(--surface)]">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => toggleUserExpand(user.id)}
-                          className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                          className="text-[var(--text-2)] hover:text-[var(--text)]"
                         >
                           {expandedUserId === user.id ? "▼" : "▶"}
                         </button>
                         <div className="flex flex-col">
                           <span className="font-medium text-sm">{user.email}</span>
                           {user.name && (
-                            <span className="text-xs text-gray-500">{user.name}</span>
+                            <span className="text-xs text-[var(--text-2)]">{user.name}</span>
                           )}
                         </div>
                       </div>
@@ -2157,14 +3692,14 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                         <span
                           className={`inline-block px-2 py-0.5 text-xs rounded w-fit ${
                             user.isAllowed
-                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                              : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                              ? "bg-[var(--green)]/10 text-[var(--green)]"
+                              : "bg-red-500/10 text-red-400"
                           }`}
                         >
                           {user.isAllowed ? "Allowed" : "Not Allowed"}
                         </span>
                         {user.isAdmin === 1 && (
-                          <span className="inline-block px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 w-fit">
+                          <span className="inline-block px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 w-fit">
                             Admin
                           </span>
                         )}
@@ -2172,7 +3707,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                     </td>
                     <td className="px-4 py-3 text-sm">{user.watchCount}</td>
                     <td className="px-4 py-3 text-sm">{user.channelCount}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
+                    <td className="px-4 py-3 text-sm text-[var(--text-2)]">
                       {new Date(user.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -2181,21 +3716,21 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                           onClick={() => handleToggleAllowed(user.id, user.isAllowed)}
                           className={`px-2 py-1 text-xs rounded ${
                             user.isAllowed
-                              ? "bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800"
-                              : "bg-green-100 dark:bg-green-900 hover:bg-green-200 dark:hover:bg-green-800"
+                              ? "bg-red-100 hover:bg-red-200"
+                              : "bg-green-100 hover:bg-green-200"
                           }`}
                         >
                           {user.isAllowed ? "Revoke" : "Allow"}
                         </button>
                         <button
                           onClick={() => handleToggleAdmin(user.id, user.isAdmin)}
-                          className="px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900 hover:bg-purple-200 dark:hover:bg-purple-800 rounded"
+                          className="px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 rounded"
                         >
                           {user.isAdmin ? "Remove Admin" : "Make Admin"}
                         </button>
                         <button
                           onClick={() => handleDeleteUser(user.id, user.email)}
-                          className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 rounded"
+                          className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
                         >
                           Delete
                         </button>
@@ -2204,9 +3739,9 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                   </tr>
                   {expandedUserId === user.id && (
                     <tr key={`${user.id}-details`}>
-                      <td colSpan={6} className="px-4 py-4 bg-gray-50 dark:bg-gray-900">
+                      <td colSpan={6} className="px-4 py-4 bg-[var(--surface)]">
                         {loadingDetails ? (
-                          <div className="text-center text-gray-500 text-sm">Loading details...</div>
+                          <div className="text-center text-[var(--text-2)] text-sm">Loading details...</div>
                         ) : userDetails ? (
                           <div className="space-y-4">
                             {/* Watches Section */}
@@ -2215,18 +3750,24 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                               {userDetails.watches.length > 0 ? (
                                 <div className="space-y-2">
                                   {userDetails.watches.map((watch) => (
-                                    <div key={watch.id} className="bg-white dark:bg-gray-800 rounded p-3 text-sm">
+                                    <div key={watch.id} className="bg-[var(--surface)] rounded p-3 text-sm">
                                       <div className="flex justify-between items-start">
-                                        <div>
+                                        <div className="flex-1">
                                           <p className="font-medium">{watch.venueName || "All Venues"}</p>
-                                          <p className="text-xs text-gray-500 mt-1">
-                                            Weekdays: {watch.weekdayTimes?.length > 0 ? watch.weekdayTimes.join(", ") : "None"}
-                                          </p>
-                                          <p className="text-xs text-gray-500">
-                                            Weekends: {watch.weekendTimes?.length > 0 ? watch.weekendTimes.join(", ") : "None"}
-                                          </p>
+                                          <div className="mt-2 space-y-1">
+                                            {watch.dayTimes && Object.entries(watch.dayTimes)
+                                              .filter(([, times]: [string, string[]]) => times?.length > 0)
+                                              .map(([day, times]: [string, string[]]) => (
+                                                <p key={day} className="text-xs text-[var(--text-2)]">
+                                                  <span className="capitalize font-medium">{day}:</span> {times.join(", ")}
+                                                </p>
+                                              ))}
+                                            {watch.dayTimes && Object.values(watch.dayTimes).every((times: string[]) => !times || times.length === 0) && (
+                                              <p className="text-xs text-[var(--text-2)] italic">No times set</p>
+                                            )}
+                                          </div>
                                         </div>
-                                        <span className={`px-2 py-0.5 text-xs rounded ${watch.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+                                        <span className={`px-2 py-0.5 text-xs rounded ${watch.active ? "bg-[var(--green)]/10 text-[var(--green)]" : "bg-[var(--surface-2)] text-[var(--text)]"}`}>
                                           {watch.active ? "Active" : "Paused"}
                                         </span>
                                       </div>
@@ -2234,7 +3775,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                                   ))}
                                 </div>
                               ) : (
-                                <p className="text-sm text-gray-500">No watches configured</p>
+                                <p className="text-sm text-[var(--text-2)]">No watches configured</p>
                               )}
                             </div>
 
@@ -2244,13 +3785,13 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                               {userDetails.channels.length > 0 ? (
                                 <div className="space-y-2">
                                   {userDetails.channels.map((channel) => (
-                                    <div key={channel.id} className="bg-white dark:bg-gray-800 rounded p-3 text-sm">
+                                    <div key={channel.id} className="bg-[var(--surface)] rounded p-3 text-sm">
                                       <div className="flex justify-between items-center">
                                         <div>
                                           <p className="font-medium capitalize">{channel.type}</p>
-                                          <p className="text-xs text-gray-500">{channel.destination}</p>
+                                          <p className="text-xs text-[var(--text-2)]">{channel.destination}</p>
                                         </div>
-                                        <span className={`px-2 py-0.5 text-xs rounded ${channel.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+                                        <span className={`px-2 py-0.5 text-xs rounded ${channel.active ? "bg-[var(--green)]/10 text-[var(--green)]" : "bg-[var(--surface-2)] text-[var(--text)]"}`}>
                                           {channel.active ? "Active" : "Paused"}
                                         </span>
                                       </div>
@@ -2258,12 +3799,12 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                                   ))}
                                 </div>
                               ) : (
-                                <p className="text-sm text-gray-500">No notification channels configured</p>
+                                <p className="text-sm text-[var(--text-2)]">No notification channels configured</p>
                               )}
                             </div>
                           </div>
                         ) : (
-                          <div className="text-center text-gray-500 text-sm">Failed to load details</div>
+                          <div className="text-center text-[var(--text-2)] text-sm">Failed to load details</div>
                         )}
                       </td>
                     </tr>
@@ -2275,13 +3816,13 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
         </div>
 
         {filteredUsers.length === 0 && (
-          <div className="p-8 text-center text-gray-500 text-sm">
+          <div className="p-8 text-center text-[var(--text-2)] text-sm">
             No users found matching your search.
           </div>
         )}
       </div>
 
-      <div className="text-sm text-gray-500">
+      <div className="text-sm text-[var(--text-2)]">
         Showing {filteredUsers.length} of {users.length} users
       </div>
 
@@ -2325,9 +3866,9 @@ function AddUserModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full">
-        <div className="p-6 border-b dark:border-gray-700">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--surface-2)] rounded-xl max-w-md w-full">
+        <div className="p-6 border-b border-[var(--border)]">
           <h2 className="text-xl font-semibold">Add New User</h2>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -2338,7 +3879,7 @@ function AddUserModal({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="user@example.com"
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
               required
             />
           </div>
@@ -2350,7 +3891,7 @@ function AddUserModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="John Doe"
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
             />
           </div>
 
@@ -2376,18 +3917,18 @@ function AddUserModal({
             <label htmlFor="isAdmin" className="text-sm">Make admin</label>
           </div>
 
-          <div className="flex gap-3 justify-end pt-4 border-t dark:border-gray-700">
+          <div className="flex gap-3 justify-end pt-4 border-t">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--surface)]"
               disabled={submitting}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[var(--green)] text-black rounded-lg hover:bg-green-400 disabled:opacity-50"
               disabled={submitting}
             >
               {submitting ? "Creating..." : "Create User"}
@@ -2482,26 +4023,26 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
   const pendingCount = requests.filter((r) => r.status === "pending").length;
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading...</div>;
+    return <div className="p-4 text-center text-[var(--text-2)]">Loading...</div>;
   }
 
   return (
     <div className="space-y-4">
       {/* Filter Tabs */}
-      <div className="flex gap-2 border-b dark:border-gray-700">
+      <div className="flex gap-2 border-b">
         {(["all", "pending", "approved", "rejected"] as const).map((status) => (
           <button
             key={status}
             onClick={() => setFilter(status)}
             className={`px-4 py-2 font-medium text-sm transition-colors border-b-2 -mb-px capitalize cursor-pointer ${
               filter === status
-                ? "border-green-600 text-green-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
+                ? "border-[var(--green)] text-[var(--green)]"
+                : "border-transparent text-[var(--text-3)] hover:text-[var(--text-2)]"
             }`}
           >
             {status}
             {status === "pending" && pendingCount > 0 && (
-              <span className="ml-2 px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full text-xs">
+              <span className="ml-2 px-2 py-0.5 bg-yellow-100 text-amber-400 rounded-full text-xs">
                 {pendingCount}
               </span>
             )}
@@ -2512,14 +4053,14 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
       {/* Requests List */}
       <div className="space-y-3">
         {filteredRequests.length === 0 ? (
-          <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6 text-center text-gray-500 text-sm">
+          <div className="bg-[var(--surface)] rounded-lg border p-6 text-center text-[var(--text-2)] text-sm">
             No {filter !== "all" ? filter : ""} requests found
           </div>
         ) : (
           filteredRequests.map((request) => (
             <div
               key={request.id}
-              className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4"
+              className="bg-[var(--surface)] rounded-lg border p-4"
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
@@ -2528,31 +4069,31 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
                     <span
                       className={`px-2 py-0.5 text-xs rounded ${
                         request.status === "pending"
-                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
+                          ? "bg-yellow-100 text-yellow-700"
                           : request.status === "approved"
-                            ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                            : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                            ? "bg-[var(--green)]/10 text-[var(--green)]"
+                            : "bg-red-500/10 text-red-400"
                       }`}
                     >
                       {request.status}
                     </span>
                   </div>
                   {request.name && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                    <p className="text-sm text-[var(--text-2)] mb-1">
                       Name: {request.name}
                     </p>
                   )}
-                  <p className="text-xs text-gray-500 mb-2">
+                  <p className="text-xs text-[var(--text-2)] mb-2">
                     Submitted: {new Date(request.createdAt).toLocaleString()}
                   </p>
                   {request.reason && (
-                    <div className="mt-2 p-2 bg-gray-50 dark:bg-gray-900 rounded">
+                    <div className="mt-2 p-2 bg-[var(--surface)] rounded">
                       <p className="text-xs font-medium mb-1">Reason:</p>
-                      <p className="text-xs text-gray-700 dark:text-gray-300">{request.reason}</p>
+                      <p className="text-xs text-[var(--text)]">{request.reason}</p>
                     </div>
                   )}
                   {request.reviewedAt && (
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-[var(--text-2)] mt-2">
                       Reviewed: {new Date(request.reviewedAt).toLocaleString()}
                     </p>
                   )}
@@ -2562,13 +4103,13 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
                     <>
                       <button
                         onClick={() => handleApprove(request.id, request.email)}
-                        className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                        className="px-3 py-1 bg-[var(--green)] text-black rounded hover:bg-green-400 text-sm"
                       >
                         Approve
                       </button>
                       <button
                         onClick={() => handleReject(request.id, request.email)}
-                        className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                        className="px-3 py-1 bg-red-500/80 text-white rounded hover:bg-red-700 text-sm"
                       >
                         Reject
                       </button>
@@ -2576,7 +4117,7 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
                   )}
                   <button
                     onClick={() => handleDelete(request.id, request.email)}
-                    className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
+                    className="px-3 py-1 bg-[var(--surface-3)] text-white rounded hover:bg-[var(--surface-3)] text-sm"
                   >
                     Delete
                   </button>
@@ -2587,7 +4128,7 @@ function AdminRequests({ showMessage }: { showMessage: (type: "success" | "error
         )}
       </div>
 
-      <div className="text-sm text-gray-500">
+      <div className="text-sm text-[var(--text-2)]">
         Showing {filteredRequests.length} of {requests.length} requests
       </div>
     </div>
@@ -2716,10 +4257,10 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
   return (
     <div className="space-y-6">
       {/* Scraper Section */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <div className="mb-4">
           <h2 className="text-lg font-semibold mb-2">Manual Scrape</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <p className="text-sm text-[var(--text-2)]">
             Trigger a manual scrape of all venues for the next 7 days. This will also notify
             users of any newly available slots.
           </p>
@@ -2727,21 +4268,21 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
         <button
           onClick={handleRunScrape}
           disabled={loading === "scrape"}
-          className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-6 py-2 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading === "scrape" ? "Starting..." : "Run Scrape Now"}
         </button>
-        <p className="mt-3 text-xs text-gray-500">
+        <p className="mt-3 text-xs text-[var(--text-2)]">
           Note: The scrape runs automatically on a schedule. Only use this if you need immediate
           results.
         </p>
       </div>
 
       {/* Cleanup Section */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <div className="mb-4">
           <h2 className="text-lg font-semibold mb-2">Database Cleanup</h2>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          <p className="text-sm text-[var(--text-2)] mb-4">
             Remove old slot data and notification logs to keep the database lean. This runs
             automatically after each scrape.
           </p>
@@ -2753,7 +4294,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
               max="90"
               value={cleanupDays}
               onChange={(e) => setCleanupDays(parseInt(e.target.value, 10) || 7)}
-              className="w-20 p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700"
+              className="w-20 p-2 border border-[var(--border)] rounded bg-[var(--surface)]"
             />
             <span className="text-sm">days</span>
           </div>
@@ -2765,85 +4306,85 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
         >
           {loading === "cleanup" ? "Running..." : "Run Cleanup Now"}
         </button>
-        <p className="mt-3 text-xs text-gray-500">
+        <p className="mt-3 text-xs text-[var(--text-2)]">
           Warning: This will permanently delete old data. Make sure to export data first if needed.
         </p>
       </div>
 
       {/* Environment Info */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <h2 className="text-lg font-semibold mb-4">System Information</h2>
         <div className="space-y-3">
-          <div className="flex items-center justify-between py-2 border-b dark:border-gray-700">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Node Environment</span>
+          <div className="flex items-center justify-between py-2 border-b">
+            <span className="text-sm font-medium text-[var(--text-2)]">Node Environment</span>
             <span className="text-sm">{process.env.NODE_ENV || "production"}</span>
           </div>
-          <div className="flex items-center justify-between py-2 border-b dark:border-gray-700">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Auto Cleanup</span>
+          <div className="flex items-center justify-between py-2 border-b">
+            <span className="text-sm font-medium text-[var(--text-2)]">Auto Cleanup</span>
             <span className="text-sm">After each scrape (keeps last 7 days by default)</span>
           </div>
           <div className="flex items-center justify-between py-2">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Cron Schedule</span>
+            <span className="text-sm font-medium text-[var(--text-2)]">Cron Schedule</span>
             <span className="text-sm">Configured in hosting platform (Railway/cron-job.org)</span>
           </div>
         </div>
       </div>
 
       {/* Venue Management */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold">Venue Management</h2>
           <button
             onClick={() => setShowVenueForm(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 text-sm"
+            className="px-4 py-2 bg-[var(--green)] text-black rounded-lg font-semibold hover:bg-green-400 text-sm"
           >
             + Add Venue
           </button>
         </div>
         <div className="space-y-2">
           {venues.map((venue) => (
-            <div key={venue.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900 rounded">
+            <div key={venue.id} className="flex justify-between items-center p-3 bg-[var(--surface)] rounded">
               <div>
                 <p className="font-medium text-sm">{venue.name}</p>
-                <p className="text-xs text-gray-500">{venue.slug} • {venue.type}</p>
+                <p className="text-xs text-[var(--text-2)]">{venue.slug} • {venue.type}</p>
               </div>
               <button
                 onClick={() => handleDeleteVenue(venue.id, venue.name)}
-                className="px-3 py-1 text-xs bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 rounded"
+                className="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
               >
                 Delete
               </button>
             </div>
           ))}
           {venues.length === 0 && (
-            <p className="text-sm text-gray-500 text-center py-4">No venues configured</p>
+            <p className="text-sm text-[var(--text-2)] text-center py-4">No venues configured</p>
           )}
         </div>
       </div>
 
       {/* System Logs */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold">Recent System Logs</h2>
           <button
             onClick={fetchLogs}
-            className="px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded"
+            className="px-3 py-1 text-sm bg-[var(--surface-2)] hover:bg-[var(--surface-3)] rounded"
           >
             Refresh
           </button>
         </div>
         {loadingLogs ? (
-          <div className="text-center text-gray-500 text-sm py-4">Loading logs...</div>
+          <div className="text-center text-[var(--text-2)] text-sm py-4">Loading logs...</div>
         ) : logs.length > 0 ? (
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {logs.map((log) => (
-              <div key={log.id} className="text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded font-mono">
+              <div key={log.id} className="text-xs p-2 bg-[var(--surface)] rounded font-mono">
                 <div className="flex items-start gap-2">
-                  <span className="text-gray-500">{new Date(log.timestamp).toLocaleString()}</span>
+                  <span className="text-[var(--text-2)]">{new Date(log.timestamp).toLocaleString()}</span>
                   <span className={`px-1 rounded ${
-                    log.level === "error" ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300" :
-                    log.level === "warn" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300" :
-                    "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+                    log.level === "error" ? "bg-red-500/10 text-red-400" :
+                    log.level === "warn" ? "bg-yellow-100 text-yellow-700" :
+                    "bg-blue-100 text-blue-700"
                   }`}>{log.level}</span>
                   <span className="flex-1">{log.message}</span>
                 </div>
@@ -2851,7 +4392,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
             ))}
           </div>
         ) : (
-          <p className="text-sm text-gray-500 text-center py-4">No recent logs</p>
+          <p className="text-sm text-[var(--text-2)] text-center py-4">No recent logs</p>
         )}
       </div>
 
@@ -2902,9 +4443,9 @@ function AddVenueModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b dark:border-gray-700">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--surface-2)] rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-[var(--border)]">
           <h2 className="text-xl font-semibold">Add New Venue</h2>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -2915,7 +4456,7 @@ function AddVenueModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Victoria Park"
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
               required
             />
           </div>
@@ -2927,10 +4468,10 @@ function AddVenueModal({
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
               placeholder="victoria-park"
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
               required
             />
-            <p className="text-xs text-gray-500 mt-1">URL-friendly identifier (e.g., victoria-park)</p>
+            <p className="text-xs text-[var(--text-2)] mt-1">URL-friendly identifier (e.g., victoria-park)</p>
           </div>
 
           <div>
@@ -2938,7 +4479,7 @@ function AddVenueModal({
             <select
               value={type}
               onChange={(e) => setType(e.target.value)}
-              className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+              className="w-full p-2 border rounded-lg bg-[var(--surface)]"
             >
               <option value="clubspark">ClubSpark</option>
               <option value="courtside">Courtside</option>
@@ -2954,7 +4495,7 @@ function AddVenueModal({
                   value={clubsparkHost}
                   onChange={(e) => setClubsparkHost(e.target.value)}
                   placeholder="clubspark.lta.org.uk"
-                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+                  className="w-full p-2 border rounded-lg bg-[var(--surface)]"
                 />
               </div>
 
@@ -2965,24 +4506,24 @@ function AddVenueModal({
                   value={clubsparkId}
                   onChange={(e) => setClubsparkId(e.target.value)}
                   placeholder="12345"
-                  className="w-full p-2 border rounded-lg bg-white dark:bg-gray-700 dark:border-gray-600"
+                  className="w-full p-2 border rounded-lg bg-[var(--surface)]"
                 />
               </div>
             </>
           )}
 
-          <div className="flex gap-3 justify-end pt-4 border-t dark:border-gray-700">
+          <div className="flex gap-3 justify-end pt-4 border-t">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
+              className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--surface)]"
               disabled={submitting}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[var(--green)] text-black rounded-lg hover:bg-green-400 disabled:opacity-50"
               disabled={submitting}
             >
               {submitting ? "Adding..." : "Add Venue"}
@@ -3060,52 +4601,52 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
   };
 
   if (loading) {
-    return <div className="p-4 text-center text-gray-500">Loading...</div>;
+    return <div className="p-4 text-center text-[var(--text-2)]">Loading...</div>;
   }
 
   return (
     <div className="space-y-6">
       {/* Database Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{dbStats?.tables?.users || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total Users</div>
+          <div className="text-sm text-[var(--text-2)]">Total Users</div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{dbStats?.tables?.watches || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total Watches</div>
+          <div className="text-sm text-[var(--text-2)]">Total Watches</div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{dbStats?.tables?.slots || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Total Slots</div>
+          <div className="text-sm text-[var(--text-2)]">Total Slots</div>
         </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-4">
+        <div className="bg-[var(--surface)] rounded-lg border p-4">
           <div className="text-2xl font-bold mb-1">{dbStats?.tables?.notificationLog || 0}</div>
-          <div className="text-sm text-gray-600 dark:text-gray-400">Notification Logs</div>
+          <div className="text-sm text-[var(--text-2)]">Notification Logs</div>
         </div>
       </div>
 
       {/* Database Operations */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <h2 className="text-lg font-semibold mb-4">Database Operations</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="border dark:border-gray-700 rounded-lg p-4">
+          <div className="border rounded-lg p-4">
             <h3 className="font-semibold mb-2">Export Database</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+            <p className="text-sm text-[var(--text-2)] mb-3">
               Download a complete JSON backup of the database
             </p>
             <button
               onClick={handleExport}
               disabled={exporting}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
             >
               {exporting ? "Exporting..." : "Export to JSON"}
             </button>
           </div>
 
-          <div className="border dark:border-gray-700 rounded-lg p-4">
+          <div className="border rounded-lg p-4">
             <h3 className="font-semibold mb-2">Vacuum Database</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+            <p className="text-sm text-[var(--text-2)] mb-3">
               Optimize database file size by reclaiming unused space
             </p>
             <button
@@ -3119,40 +4660,40 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
       </div>
 
       {/* Database Info */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <h2 className="text-lg font-semibold mb-4">Database Information</h2>
         <div className="space-y-3">
-          <div className="flex items-center justify-between py-2 border-b dark:border-gray-700">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Database Type</span>
+          <div className="flex items-center justify-between py-2 border-b">
+            <span className="text-sm font-medium text-[var(--text-2)]">Database Type</span>
             <span className="text-sm">SQLite</span>
           </div>
-          <div className="flex items-center justify-between py-2 border-b dark:border-gray-700">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">ORM</span>
+          <div className="flex items-center justify-between py-2 border-b">
+            <span className="text-sm font-medium text-[var(--text-2)]">ORM</span>
             <span className="text-sm">Drizzle ORM</span>
           </div>
-          <div className="flex items-center justify-between py-2 border-b dark:border-gray-700">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Database File</span>
+          <div className="flex items-center justify-between py-2 border-b">
+            <span className="text-sm font-medium text-[var(--text-2)]">Database File</span>
             <span className="text-sm font-mono text-xs">sqlite.db</span>
           </div>
           <div className="flex items-center justify-between py-2">
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Backup</span>
-            <span className="text-sm text-gray-500">Export to create backup</span>
+            <span className="text-sm font-medium text-[var(--text-2)]">Last Backup</span>
+            <span className="text-sm text-[var(--text-2)]">Export to create backup</span>
           </div>
         </div>
       </div>
 
       {/* Table Details */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-6">
+      <div className="bg-[var(--surface)] rounded-lg border p-6">
         <h2 className="text-lg font-semibold mb-4">Table Details</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900">
+            <thead className="bg-[var(--surface)]">
               <tr>
                 <th className="px-4 py-2 text-left font-medium">Table Name</th>
                 <th className="px-4 py-2 text-right font-medium">Row Count</th>
               </tr>
             </thead>
-            <tbody className="divide-y dark:divide-gray-700">
+            <tbody className="divide-y">
               {Object.entries(dbStats?.tables || {}).map(([table, count]) => (
                 <tr key={table}>
                   <td className="px-4 py-2 font-mono text-xs">{table}</td>
@@ -3168,17 +4709,14 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
 }
 
 function SuspenseFallback() {
-  console.log("[Dashboard] Suspense fallback rendering");
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-gray-500">Loading...</div>
+      <div className="text-[var(--text-2)]">Loading...</div>
     </div>
   );
 }
 
 export default function Dashboard() {
-  console.log("[Dashboard] Wrapper rendering, window.location:", typeof window !== "undefined" ? window.location.href : "SSR");
-
   return (
     <Suspense fallback={<SuspenseFallback />}>
       <DashboardContent />
