@@ -1538,25 +1538,25 @@ function DashboardContent() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleBulkToggle(true)}
-                          className="px-3 py-1.5 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-lg font-medium transition-colors"
+                          className="px-3 py-1.5 text-xs bg-[var(--green)]/10 hover:bg-[var(--green)]/20 text-[var(--green)] rounded-lg font-medium transition-colors"
                         >
                           Activate All
                         </button>
                         <button
                           onClick={() => handleBulkToggle(false)}
-                          className="px-3 py-1.5 text-xs bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text)] rounded-lg font-medium transition-colors"
+                          className="px-3 py-1.5 text-xs bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)] rounded-lg font-medium transition-colors"
                         >
                           Pause All
                         </button>
                         <button
                           onClick={() => setBulkEditMode(true)}
-                          className="px-3 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg font-medium transition-colors"
+                          className="px-3 py-1.5 text-xs bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)] rounded-lg font-medium transition-colors"
                         >
                           Bulk Edit
                         </button>
                         <button
                           onClick={handleBulkDelete}
-                          className="px-3 py-1.5 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded-lg font-medium transition-colors"
+                          className="px-3 py-1.5 text-xs bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] border border-[var(--red)]/20 rounded-lg font-medium transition-colors"
                         >
                           Delete ({selectedWatchIds.size})
                         </button>
@@ -1827,8 +1827,8 @@ function DashboardContent() {
                                     onClick={() => handleToggleWatch(watch.id, watch.active)}
                                     className={`px-2 py-1 text-xs rounded font-medium transition-colors ${
                                       watch.active
-                                        ? "bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text)]"
-                                        : "bg-green-100 hover:bg-green-200 text-green-700"
+                                        ? "bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)]"
+                                        : "bg-[var(--green)]/10 hover:bg-[var(--green)]/20 text-[var(--green)]"
                                     }`}
                                     title={watch.active ? "Pause watch" : "Activate watch"}
                                   >
@@ -1839,14 +1839,14 @@ function DashboardContent() {
                                       const { color: _color, ...watchWithoutColor } = watch;
                                       setEditingWatch(watchWithoutColor);
                                     }}
-                                    className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded font-medium transition-colors"
+                                    className="px-2 py-1 text-xs bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)] rounded font-medium transition-colors"
                                     title="Edit watch"
                                   >
                                     Edit
                                   </button>
                                   <button
                                     onClick={() => handleDeleteWatch(watch.id)}
-                                    className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded font-medium transition-colors"
+                                    className="px-2 py-1 text-xs bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] border border-[var(--red)]/20 rounded font-medium transition-colors"
                                     title="Delete watch"
                                   >
                                     Delete
@@ -1960,23 +1960,23 @@ function DashboardContent() {
                         </span>
                         <button
                           onClick={() => handleToggleChannel(channel.id, channel.active)}
-                          className={`px-3 py-1 text-xs rounded ${
+                          className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
                             channel.active
-                              ? "bg-[var(--surface-2)] hover:bg-[var(--surface-3)]"
-                              : "bg-green-100 hover:bg-green-200"
+                              ? "bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)]"
+                              : "bg-[var(--green)]/10 hover:bg-[var(--green)]/20 text-[var(--green)]"
                           }`}
                         >
                           {channel.active ? "Pause" : "Activate"}
                         </button>
                         <button
                           onClick={() => setEditingChannel(channel)}
-                          className="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 rounded"
+                          className="px-3 py-1 text-xs bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)] rounded font-medium transition-colors"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDeleteChannel(channel.id)}
-                          className="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
+                          className="px-3 py-1 text-xs bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] border border-[var(--red)]/20 rounded font-medium transition-colors"
                         >
                           Delete
                         </button>
@@ -1994,7 +1994,7 @@ function DashboardContent() {
       {activeTab === "admin" && isAuthenticated && isAdmin && (
         <div className="space-y-6">
           {/* Admin Sub-tabs */}
-          <div className="flex gap-2 border-b">
+          <div className="flex justify-center gap-2 border-b border-[var(--border)]">
             <button
               onClick={() => {
                 setAdminSubTab("overview");
@@ -2269,6 +2269,14 @@ function WatchFormModal({
       });
       return updated;
     });
+    // Enable all days that received times
+    if (times.length > 0) {
+      setEnabledDays(prev => {
+        const next = new Set(prev);
+        days.forEach(day => next.add(day));
+        return next;
+      });
+    }
   };
 
   const clearDays = (days: readonly string[]) => {
@@ -2278,6 +2286,12 @@ function WatchFormModal({
         updated[day as typeof DAYS[number]] = [];
       });
       return updated;
+    });
+    // Disable cleared days
+    setEnabledDays(prev => {
+      const next = new Set(prev);
+      days.forEach(day => next.delete(day));
+      return next;
     });
   };
 

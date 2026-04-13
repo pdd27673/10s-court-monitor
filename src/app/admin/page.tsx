@@ -264,7 +264,7 @@ function QuickActionCard({
         </div>
         <div className="flex items-center gap-2">
           {badge !== undefined && badge > 0 && (
-            <span className="px-2.5 py-1 bg-red-500 text-white text-xs font-semibold rounded-full animate-pulse">
+            <span className="px-2.5 py-1 bg-[var(--red)]/10 text-[var(--red)] border border-[var(--red)]/20 text-xs font-semibold rounded-full">
               {badge}
             </span>
           )}
