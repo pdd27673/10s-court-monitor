@@ -38,16 +38,17 @@ function convertTo12HourFormat(hour: number): string {
 
 export async function scrapeClubSpark(
   venue: Venue,
-  date: string
+  startDate: string,
+  endDate: string
 ): Promise<ScrapedSlot[]> {
   if (!venue.clubsparkHost || !venue.clubsparkId) {
     throw new Error(`Venue ${venue.slug} missing ClubSpark config`);
   }
 
-  const url = `https://${venue.clubsparkHost}/v0/VenueBooking/${venue.clubsparkId}/GetVenueSessions?resourceID=&startDate=${date}&endDate=${date}&roleId=`;
+  const url = `https://${venue.clubsparkHost}/v0/VenueBooking/${venue.clubsparkId}/GetVenueSessions?resourceID=&startDate=${startDate}&endDate=${endDate}`;
 
   const agent = proxyManager.getAgent();
-  console.log(`📍 ClubSpark ${venue.slug} | ${date} | ${agent ? "via proxy" : "DIRECT"}`);
+  console.log(`📍 ClubSpark ${venue.slug} | ${startDate}→${endDate} | ${agent ? "via proxy" : "DIRECT"}`);
 
   const response = await proxyFetch(url, {
     agent,
@@ -77,52 +78,62 @@ export async function scrapeClubSpark(
   const startHour = Math.floor(data.EarliestStartTime / 60);
   const endHour = Math.floor(data.LatestEndTime / 60);
 
+  const NON_TENNIS_KEYWORDS = ["cricket", "netball", "football", "basketball", "bowls", "bowling"];
+
   for (const resource of data.Resources) {
     const courtName = resource.Name;
-    const dayData = resource.Days.find((d) => d.Date.startsWith(date));
-    const sessions = dayData?.Sessions || [];
 
-    // Generate slots for each hour
-    for (let hour = startHour; hour < endHour; hour++) {
-      const timeMinutes = hour * 60;
-      const timeStr = convertTo12HourFormat(hour);
+    // Skip non-tennis courts (e.g. cricket nets at West Ham Park)
+    if (NON_TENNIS_KEYWORDS.some((kw) => courtName.toLowerCase().includes(kw))) {
+      continue;
+    }
 
-      // Find session that covers this time slot
-      const session = sessions.find(
-        (s) => s.StartTime <= timeMinutes && s.EndTime > timeMinutes
-      );
+    for (const dayData of resource.Days) {
+      const date = dayData.Date.split("T")[0];
+      const sessions = dayData.Sessions;
 
-      let status: "available" | "booked" | "closed" | "coaching";
-      let price: string | undefined;
+      // Generate slots for each hour
+      for (let hour = startHour; hour < endHour; hour++) {
+        const timeMinutes = hour * 60;
+        const timeStr = convertTo12HourFormat(hour);
 
-      if (session) {
-        if (session.Category === 0) {
-          // Category 0 = Available slot that can be booked
-          status = "available";
-          const totalCost = session.CourtCost + session.LightingCost;
-          price = `£${totalCost.toFixed(2)}`;
-        } else if (session.Category === 1000) {
-          // User booking - slot is taken
-          status = "booked";
+        // Find session that covers this time slot
+        const session = sessions.find(
+          (s) => s.StartTime <= timeMinutes && s.EndTime > timeMinutes
+        );
+
+        let status: "available" | "booked" | "closed" | "coaching";
+        let price: string | undefined;
+
+        if (session) {
+          if (session.Category === 0) {
+            // Category 0 = Available slot that can be booked
+            status = "available";
+            const totalCost = session.CourtCost + session.LightingCost;
+            price = `£${totalCost.toFixed(2)}`;
+          } else if (session.Category === 1000) {
+            // User booking - slot is taken
+            status = "booked";
+          } else {
+            // Coaching/class/other - venue is operational but not available for public booking
+            status = "coaching";
+          }
         } else {
-          // Coaching/class/other - venue is operational but not available for public booking
-          status = "coaching";
+          // No session = available for booking
+          status = "available";
+          // Default price (could fetch from GetSettings if needed)
+          price = "£10.00";
         }
-      } else {
-        // No session = available for booking
-        status = "available";
-        // Default price (could fetch from GetSettings if needed)
-        price = "£10.00";
-      }
 
-      slots.push({
-        venue: venue.slug,
-        date,
-        time: timeStr,
-        court: courtName,
-        status,
-        price,
-      });
+        slots.push({
+          venue: venue.slug,
+          date,
+          time: timeStr,
+          court: courtName,
+          status,
+          price,
+        });
+      }
     }
   }
 

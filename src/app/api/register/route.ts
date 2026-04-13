@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { registrationRequests, users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { sendEmail } from "@/lib/notifiers/email";
+import { escapeHtml } from "@/lib/utils/html-escape";
 
 // Simple rate limiting using in-memory store (for production, use Redis or similar)
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
@@ -56,8 +57,11 @@ export async function POST(request: Request) {
       );
     }
 
+    // Normalize email to lowercase for case-insensitive comparison
+    const normalizedEmail = email.toLowerCase();
+
     // Check if user already exists
-    const existingUser = await db.select().from(users).where(eq(users.email, email));
+    const existingUser = await db.select().from(users).where(eq(users.email, normalizedEmail));
     if (existingUser.length > 0) {
       return NextResponse.json(
         { error: "An account with this email already exists" },
@@ -69,7 +73,7 @@ export async function POST(request: Request) {
     const existingRequest = await db
       .select()
       .from(registrationRequests)
-      .where(eq(registrationRequests.email, email));
+      .where(eq(registrationRequests.email, normalizedEmail));
 
     const pendingRequest = existingRequest.find((r) => r.status === "pending");
     if (pendingRequest) {
@@ -83,7 +87,7 @@ export async function POST(request: Request) {
     const [newRequest] = await db
       .insert(registrationRequests)
       .values({
-        email,
+        email: normalizedEmail,
         name: name || null,
         reason: reason.trim(),
         status: "pending",
@@ -107,9 +111,9 @@ export async function POST(request: Request) {
             <h2>New Registration Request</h2>
             <p>A new user has requested access to Time for Tennis:</p>
             <ul>
-              <li><strong>Email:</strong> ${email}</li>
-              <li><strong>Name:</strong> ${name || "Not provided"}</li>
-              <li><strong>Reason:</strong> ${reason}</li>
+              <li><strong>Email:</strong> ${escapeHtml(normalizedEmail)}</li>
+              <li><strong>Name:</strong> ${escapeHtml(name) || "Not provided"}</li>
+              <li><strong>Reason:</strong> ${escapeHtml(reason)}</li>
             </ul>
             <p>
               <a href="${process.env.NEXTAUTH_URL}/admin/requests" style="display: inline-block; padding: 10px 20px; background-color: #16a34a; color: white; text-decoration: none; border-radius: 5px;">

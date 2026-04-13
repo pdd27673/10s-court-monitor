@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, Fragment, useCallback } from "react";
+import { Suspense, useEffect, useState, Fragment, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -296,6 +296,9 @@ function DashboardContent() {
   const [selectedWatchIds, setSelectedWatchIds] = useState<Set<number>>(new Set());
   const [bulkEditMode, setBulkEditMode] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
+
+  // Ref for scrolling to alerts panel
+  const alertsRef = useRef<HTMLDivElement>(null);
 
   // Available time slots
   const TIME_SLOTS = [
@@ -930,6 +933,15 @@ function DashboardContent() {
         isGuest={isGuest}
         activeTab={navTabMap[activeTab] ?? "courts"}
         onTabChange={(tab) => {
+          if (tab === "alerts") {
+            // Switch to courts tab and scroll to alerts panel
+            setActiveTab("availability");
+            router.push("/dashboard?tab=availability", { scroll: false });
+            setTimeout(() => {
+              alertsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 100);
+            return;
+          }
           const dashTab = dashTabMap[tab] ?? "availability";
           setActiveTab(dashTab);
           if (dashTab === "admin") {
@@ -1331,7 +1343,7 @@ function DashboardContent() {
 
           {/* My Recent Alerts — always visible below the table for authenticated users */}
           {isAuthenticated && (
-            <div className="mt-8">
+            <div className="mt-8" ref={alertsRef}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-[var(--text)] uppercase tracking-widest">Recent Alerts</h2>
                 {matches.length > 0 && (

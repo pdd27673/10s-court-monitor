@@ -37,17 +37,31 @@ export async function GET(
     });
   }
 
+  // Support both new dayTimes and legacy weekday/weekend fields
+  let dayTimes = null;
+  if (watch.dayTimes) {
+    dayTimes = JSON.parse(watch.dayTimes);
+  } else if (watch.weekdayTimes || watch.weekendTimes) {
+    // Convert legacy format to new format
+    const weekday = watch.weekdayTimes ? JSON.parse(watch.weekdayTimes) : [];
+    const weekend = watch.weekendTimes ? JSON.parse(watch.weekendTimes) : [];
+    dayTimes = {
+      monday: weekday,
+      tuesday: weekday,
+      wednesday: weekday,
+      thursday: weekday,
+      friday: weekday,
+      saturday: weekend,
+      sunday: weekend,
+    };
+  }
+
   return NextResponse.json({
     watch: {
       id: watch.id,
       userId: watch.userId,
       venue: venue ? { slug: venue.slug, name: venue.name } : null,
-      weekdayTimes: watch.weekdayTimes
-        ? JSON.parse(watch.weekdayTimes)
-        : null,
-      weekendTimes: watch.weekendTimes
-        ? JSON.parse(watch.weekendTimes)
-        : null,
+      dayTimes,
       active: Boolean(watch.active),
     },
   });
@@ -81,39 +95,16 @@ export async function PUT(
   }
 
   const body = await request.json();
-  const { venueSlug, weekdayTimes, weekendTimes, active } = body;
-
-  // Get venue ID if provided
-  let venueId = existingWatch.venueId;
-  if (venueSlug !== undefined) {
-    if (venueSlug === null) {
-      venueId = null;
-    } else {
-      const venue = await db.query.venues.findFirst({
-        where: eq(venues.slug, venueSlug),
-      });
-      if (venue) {
-        venueId = venue.id;
-      } else {
-        return NextResponse.json({ error: "Invalid venue" }, { status: 400 });
-      }
-    }
-  }
+  const { dayTimes, active } = body;
 
   const updateData: {
-    venueId: number | null;
-    weekdayTimes: string | null;
-    weekendTimes: string | null;
+    dayTimes?: string | null;
     active?: number;
-  } = {
-    venueId,
-    weekdayTimes: weekdayTimes !== undefined
-      ? weekdayTimes ? JSON.stringify(weekdayTimes) : null
-      : existingWatch.weekdayTimes,
-    weekendTimes: weekendTimes !== undefined
-      ? weekendTimes ? JSON.stringify(weekendTimes) : null
-      : existingWatch.weekendTimes,
-  };
+  } = {};
+
+  if (dayTimes !== undefined) {
+    updateData.dayTimes = dayTimes ? JSON.stringify(dayTimes) : null;
+  }
 
   if (active !== undefined) {
     updateData.active = active ? 1 : 0;
@@ -142,17 +133,31 @@ export async function PUT(
     });
   }
 
+  // Support both new dayTimes and legacy weekday/weekend fields
+  let responseDayTimes = null;
+  if (updatedWatch.dayTimes) {
+    responseDayTimes = JSON.parse(updatedWatch.dayTimes);
+  } else if (updatedWatch.weekdayTimes || updatedWatch.weekendTimes) {
+    // Convert legacy format to new format
+    const weekday = updatedWatch.weekdayTimes ? JSON.parse(updatedWatch.weekdayTimes) : [];
+    const weekend = updatedWatch.weekendTimes ? JSON.parse(updatedWatch.weekendTimes) : [];
+    responseDayTimes = {
+      monday: weekday,
+      tuesday: weekday,
+      wednesday: weekday,
+      thursday: weekday,
+      friday: weekday,
+      saturday: weekend,
+      sunday: weekend,
+    };
+  }
+
   return NextResponse.json({
     watch: {
       id: updatedWatch.id,
       userId: updatedWatch.userId,
       venue: venue ? { slug: venue.slug, name: venue.name } : null,
-      weekdayTimes: updatedWatch.weekdayTimes
-        ? JSON.parse(updatedWatch.weekdayTimes)
-        : null,
-      weekendTimes: updatedWatch.weekendTimes
-        ? JSON.parse(updatedWatch.weekendTimes)
-        : null,
+      dayTimes: responseDayTimes,
       active: Boolean(updatedWatch.active),
     },
   });
@@ -261,17 +266,31 @@ export async function PATCH(
     });
   }
 
+  // Support both new dayTimes and legacy weekday/weekend fields
+  let dayTimes = null;
+  if (updatedWatch.dayTimes) {
+    dayTimes = JSON.parse(updatedWatch.dayTimes);
+  } else if (updatedWatch.weekdayTimes || updatedWatch.weekendTimes) {
+    // Convert legacy format to new format
+    const weekday = updatedWatch.weekdayTimes ? JSON.parse(updatedWatch.weekdayTimes) : [];
+    const weekend = updatedWatch.weekendTimes ? JSON.parse(updatedWatch.weekendTimes) : [];
+    dayTimes = {
+      monday: weekday,
+      tuesday: weekday,
+      wednesday: weekday,
+      thursday: weekday,
+      friday: weekday,
+      saturday: weekend,
+      sunday: weekend,
+    };
+  }
+
   return NextResponse.json({
     watch: {
       id: updatedWatch.id,
       userId: updatedWatch.userId,
       venue: venue ? { slug: venue.slug, name: venue.name } : null,
-      weekdayTimes: updatedWatch.weekdayTimes
-        ? JSON.parse(updatedWatch.weekdayTimes)
-        : null,
-      weekendTimes: updatedWatch.weekendTimes
-        ? JSON.parse(updatedWatch.weekendTimes)
-        : null,
+      dayTimes,
       active: Boolean(updatedWatch.active),
     },
   });

@@ -16,7 +16,7 @@ export async function GET(
     }
 
     // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email)).limit(1);
+    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
     if (!adminUser[0] || !adminUser[0].isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -33,6 +33,7 @@ export async function GET(
       .select({
         id: watches.id,
         venueId: watches.venueId,
+        dayTimes: watches.dayTimes,
         weekdayTimes: watches.weekdayTimes,
         weekendTimes: watches.weekendTimes,
         active: watches.active,
@@ -43,14 +44,34 @@ export async function GET(
       .leftJoin(venues, eq(watches.venueId, venues.id))
       .where(eq(watches.userId, userId));
 
-    const formattedWatches = userWatches.map((w) => ({
-      id: w.id,
-      venueSlug: w.venueSlug,
-      venueName: w.venueName,
-      weekdayTimes: w.weekdayTimes ? JSON.parse(w.weekdayTimes) : [],
-      weekendTimes: w.weekendTimes ? JSON.parse(w.weekendTimes) : [],
-      active: Boolean(w.active),
-    }));
+    const formattedWatches = userWatches.map((w) => {
+      // Support both new dayTimes and legacy weekday/weekend fields
+      let dayTimes = null;
+      if (w.dayTimes) {
+        dayTimes = JSON.parse(w.dayTimes);
+      } else if (w.weekdayTimes || w.weekendTimes) {
+        // Convert legacy format to new format
+        const weekday = w.weekdayTimes ? JSON.parse(w.weekdayTimes) : [];
+        const weekend = w.weekendTimes ? JSON.parse(w.weekendTimes) : [];
+        dayTimes = {
+          monday: weekday,
+          tuesday: weekday,
+          wednesday: weekday,
+          thursday: weekday,
+          friday: weekday,
+          saturday: weekend,
+          sunday: weekend,
+        };
+      }
+
+      return {
+        id: w.id,
+        venueSlug: w.venueSlug,
+        venueName: w.venueName,
+        dayTimes,
+        active: Boolean(w.active),
+      };
+    });
 
     return NextResponse.json({ watches: formattedWatches });
   } catch (error) {

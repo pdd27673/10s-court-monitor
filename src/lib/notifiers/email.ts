@@ -1,13 +1,21 @@
 import { Resend } from "resend";
 import { SlotChange } from "../differ";
 import { getBookingUrl } from "../utils/link-helpers";
+import { escapeHtml } from "../utils/html-escape";
 import type { ScrapeStats } from "../scraper";
 
 // Admin email for scrape alerts
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
 // Alert threshold: if failure rate exceeds this percentage, send alert
-const FAILURE_ALERT_THRESHOLD = parseFloat(process.env.SCRAPE_FAILURE_THRESHOLD || "20");
+const FAILURE_ALERT_THRESHOLD = parseFloat(process.env.SCRAPE_FAILURE_THRESHOLD || "40");
+
+// Cooldown between failure alert emails (default: 1 hour)
+const FAILURE_ALERT_COOLDOWN_MS =
+  parseFloat(process.env.SCRAPE_ALERT_COOLDOWN_HOURS || "1") * 60 * 60 * 1000;
+
+// In-memory timestamp of last alert (persists across cron runs within the same process)
+let lastFailureAlertAt: number | null = null;
 
 // Resend client for HTTP-based email
 const resend = process.env.RESEND_API_KEY
@@ -103,8 +111,8 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
     html += `
       <div style="margin-bottom: 24px; padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
         <div style="margin-bottom: 16px;">
-          <h2 style="margin: 0 0 6px 0; color: #111827; font-size: 20px; font-weight: 600;">${group.venueName}</h2>
-          <p style="margin: 0; color: #6b7280; font-size: 14px;">${formattedDate}</p>
+          <h2 style="margin: 0 0 6px 0; color: #111827; font-size: 20px; font-weight: 600;">${escapeHtml(group.venueName)}</h2>
+          <p style="margin: 0; color: #6b7280; font-size: 14px;">${escapeHtml(formattedDate)}</p>
         </div>
         
         <div style="background: #f9fafb; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
@@ -113,17 +121,17 @@ export function formatSlotChangesForEmail(changes: SlotChange[]): {
     `;
 
     for (const slot of sortedSlots) {
-      const priceStr = slot.price ? ` <span style="color: #059669; font-weight: 500;">${slot.price}</span>` : "";
-      html += `<li style="margin: 6px 0; color: #374151; font-size: 14px;">• ${slot.time} - <strong>${slot.court}</strong>${priceStr}</li>`;
+      const priceStr = slot.price ? ` <span style="color: #059669; font-weight: 500;">${escapeHtml(slot.price)}</span>` : "";
+      html += `<li style="margin: 6px 0; color: #374151; font-size: 14px;">• ${escapeHtml(slot.time)} - <strong>${escapeHtml(slot.court)}</strong>${priceStr}</li>`;
     }
 
     html += `
           </ul>
         </div>
         
-        <a href="${bookingUrl}" 
+        <a href="${escapeHtml(bookingUrl)}" 
            style="display: inline-block; width: 100%; text-align: center; padding: 14px 24px; background: #16a34a; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; transition: background-color 0.2s;">
-          Book ${group.venueName} →
+          Book ${escapeHtml(group.venueName)} →
         </a>
       </div>
     `;
@@ -161,6 +169,14 @@ export async function sendScrapeFailureAlert(stats: ScrapeStats): Promise<boolea
 
   // Only alert if failure rate exceeds threshold
   if (failureRate < FAILURE_ALERT_THRESHOLD) {
+    return false;
+  }
+
+  // Cooldown: don't spam alerts — at most one per cooldown window
+  const now = Date.now();
+  if (lastFailureAlertAt !== null && now - lastFailureAlertAt < FAILURE_ALERT_COOLDOWN_MS) {
+    const minutesRemaining = Math.ceil((FAILURE_ALERT_COOLDOWN_MS - (now - lastFailureAlertAt)) / 60000);
+    console.log(`🔕 Scrape failure alert suppressed (cooldown — ${minutesRemaining}m remaining)`);
     return false;
   }
 
@@ -211,6 +227,7 @@ export async function sendScrapeFailureAlert(stats: ScrapeStats): Promise<boolea
 
   try {
     await sendEmail(ADMIN_EMAIL, subject, html);
+    lastFailureAlertAt = Date.now();
     console.log(`🚨 Admin alert sent: ${failureRate.toFixed(1)}% failure rate`);
     return true;
   } catch (error) {
