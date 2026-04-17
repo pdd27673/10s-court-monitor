@@ -10,9 +10,8 @@ cmds = ["npm ci --include=dev"]
 [phases.build]
 cmds = [
   "npm run build",
-  "mkdir -p data",
-  "npm run db:migrate"
+  "mkdir -p data"
 ]
 
 [start]
-cmd = "npm start"
+cmd = "mkdir -p data && npm run db:migrate && npm start"
