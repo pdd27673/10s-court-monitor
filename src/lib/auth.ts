@@ -102,7 +102,7 @@ const customAdapter: Adapter = {
     };
   },
 
-  async createUser(data) {
+  async createUser(_data) {
     // Don't auto-create users - they should only be created through registration approval
     // This prevents "zombie" accounts for unapproved users
     // If we reach this point, the user was already checked in getUserByEmail and exists
@@ -200,7 +200,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     error: "/login/error",
   },
   callbacks: {
-    async signIn({ user, email }) {
+    async signIn({ user }) {
       if (!user.email) return false;
 
       // Check if user exists and is allowed (normalize email to lowercase)

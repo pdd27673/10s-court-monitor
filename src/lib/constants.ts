@@ -12,12 +12,9 @@ export interface Venue {
 export const VENUES: Venue[] = [
   // Courtside platform (Tower Hamlets)
   { slug: "bethnal-green-gardens", name: "Bethnal Green Gardens", type: "courtside" },
-  { slug: "king-edward-memorial-park", name: "King Edward Memorial Park", type: "courtside" },
-  { slug: "poplar-rec-ground", name: "Poplar Rec Ground", type: "courtside" },
   { slug: "ropemakers-field", name: "Ropemakers Field", type: "courtside" },
   { slug: "st-johns-park", name: "St Johns Park", type: "courtside" },
   { slug: "victoria-park", name: "Victoria Park", type: "courtside" },
-  { slug: "wapping-gardens", name: "Wapping Gardens", type: "courtside" },
 
   // ClubSpark platform (LTA venues)
   {
@@ -26,13 +23,6 @@ export const VENUES: Venue[] = [
     type: "clubspark",
     clubsparkId: "stratford_newhamparkstennis_org_uk",
     clubsparkHost: "stratford.newhamparkstennis.org.uk",
-  },
-  {
-    slug: "abbotts-park",
-    name: "Abbotts Park",
-    type: "clubspark",
-    clubsparkId: "abbotts_playtenniswalthamforest_com",
-    clubsparkHost: "abbotts.playtenniswalthamforest.com",
   },
   {
     slug: "west-ham-park",

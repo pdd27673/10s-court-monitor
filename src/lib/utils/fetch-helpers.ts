@@ -4,6 +4,7 @@
  * @returns Parsed JSON data
  * @throws Error if response is not ok
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function handleApiResponse<T = any>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorMessage = `API Error: ${response.status} ${response.statusText}`;
@@ -41,11 +42,11 @@ export function parseIdParam(idString: string, paramName: string = "id"): number
  * @returns Parsed user ID
  * @throws Error if session is invalid or user ID is NaN
  */
-export function parseSessionUserId(session: any): number {
+export function parseSessionUserId(session: { user?: { id?: string | number } } | null | undefined): number {
   if (!session?.user?.id) {
     throw new Error("Invalid session");
   }
-  const userId = parseInt(session.user.id, 10);
+  const userId = typeof session.user.id === 'number' ? session.user.id : parseInt(session.user.id, 10);
   if (isNaN(userId)) {
     throw new Error("Invalid user session");
   }

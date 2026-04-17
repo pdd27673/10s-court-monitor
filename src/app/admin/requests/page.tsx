@@ -50,7 +50,7 @@ export default function RegistrationRequests() {
 
       await fetchRequests();
       showMessage("success", `Approved ${email} - account created and welcome email sent`);
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to approve request");
     }
   };
@@ -69,7 +69,7 @@ export default function RegistrationRequests() {
 
       await fetchRequests();
       showMessage("success", `Rejected ${email} - rejection email sent`);
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to reject request");
     }
   };
@@ -86,7 +86,7 @@ export default function RegistrationRequests() {
 
       await fetchRequests();
       showMessage("success", "Request deleted");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to delete request");
     }
   };

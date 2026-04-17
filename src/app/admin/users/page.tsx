@@ -49,7 +49,7 @@ export default function UsersManagement() {
 
       await fetchUsers();
       showMessage("success", "User status updated");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to update user");
     }
   };
@@ -66,7 +66,7 @@ export default function UsersManagement() {
 
       await fetchUsers();
       showMessage("success", "Admin status updated");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to update user");
     }
   };
@@ -85,7 +85,7 @@ export default function UsersManagement() {
 
       await fetchUsers();
       showMessage("success", "User deleted successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to delete user");
     }
   };
@@ -232,23 +232,23 @@ export default function UsersManagement() {
                     <div className="flex gap-2 justify-end">
                       <button
                         onClick={() => handleToggleAllowed(user.id, user.isAllowed)}
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${
                           user.isAllowed
-                            ? "bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800"
-                            : "bg-green-100 dark:bg-green-900/30 hover:bg-green-200 dark:hover:bg-green-900/50 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800"
+                            ? "bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] border-[var(--red)]/20"
+                            : "bg-[var(--green)]/10 hover:bg-[var(--green)]/20 text-[var(--green)] border-[var(--green)]/20"
                         }`}
                       >
                         {user.isAllowed ? "Revoke" : "Allow"}
                       </button>
                       <button
                         onClick={() => handleToggleAdmin(user.id, user.isAdmin)}
-                        className="px-3 py-1.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/30 hover:bg-purple-200 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-md transition-colors border border-purple-200 dark:border-purple-800"
+                        className="px-3 py-1.5 text-xs font-medium bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-2)] rounded-md transition-colors border border-[var(--border)]"
                       >
                         {user.isAdmin ? "Remove Admin" : "Make Admin"}
                       </button>
                       <button
                         onClick={() => handleDeleteUser(user.id, user.email)}
-                        className="px-3 py-1.5 text-xs font-medium bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-md transition-colors border border-red-200 dark:border-red-800"
+                        className="px-3 py-1.5 text-xs font-medium bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] rounded-md transition-colors border border-[var(--red)]/20"
                       >
                         Delete
                       </button>

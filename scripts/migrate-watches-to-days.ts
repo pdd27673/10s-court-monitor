@@ -29,7 +29,7 @@ function migrateWatches() {
     console.log('Starting watch migration...');
     
     // Check if day_times column exists, add it if not
-    const columns = db.prepare("PRAGMA table_info(watches)").all() as any[];
+    const columns = db.prepare("PRAGMA table_info(watches)").all() as { name: string }[];
     const hasDayTimes = columns.some(col => col.name === 'day_times');
     
     if (!hasDayTimes) {

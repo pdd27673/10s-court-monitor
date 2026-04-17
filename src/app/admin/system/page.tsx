@@ -22,7 +22,7 @@ export default function SystemManagement() {
       if (!res.ok) throw new Error("Failed to start scrape");
 
       showMessage("success", "Scrape job started successfully");
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to start scrape");
     } finally {
       setLoading(null);
@@ -48,7 +48,7 @@ export default function SystemManagement() {
         "success",
         `Cleanup completed: ${data.deletedSlots} slots, ${data.deletedLogs} logs deleted`
       );
-    } catch (error) {
+    } catch {
       showMessage("error", "Failed to run cleanup");
     } finally {
       setLoading(null);

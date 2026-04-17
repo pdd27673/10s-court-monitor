@@ -38,10 +38,10 @@ export default function RegisterPage() {
         text: data.message || "Your request has been submitted successfully!",
       });
       setSubmitted(true);
-    } catch (error: any) {
+    } catch (error) {
       setMessage({
         type: "error",
-        text: error.message || "An error occurred. Please try again.",
+        text: error instanceof Error ? error.message : "An error occurred. Please try again.",
       });
     } finally {
       setLoading(false);
@@ -50,155 +50,171 @@ export default function RegisterPage() {
 
   if (submitted) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-8">
-        <div className="max-w-md w-full bg-black rounded-lg shadow-lg p-8">
+      <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-4 py-12">
+        <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-green-600/5 blur-[120px]" />
+        </div>
+
+        <div className="relative z-10 w-full max-w-sm text-center">
+          {/* Back link */}
           <button
             onClick={() => router.push("/")}
-            className="mb-4 text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+            className="inline-flex items-center gap-1.5 text-sm text-[var(--text-2)] hover:text-[var(--text)] transition-colors mb-8 group cursor-pointer"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-150" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            Back to Home
+            Back to home
           </button>
-          <div className="text-center">
-            <div className="mb-4">
-              <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center mx-auto">
-                <svg
-                  className="w-8 h-8 text-green-600 dark:text-green-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-              </div>
-            </div>
-            <h1 className="text-2xl font-bold mb-4 text-white">Request Submitted!</h1>
-            <p className="text-gray-300 mb-6">
-              Your registration request has been submitted for approval. We&apos;ll review your
-              request and send you an email once it&apos;s been processed.
-            </p>
-            <div className="space-y-3">
-              <Link
-                href="/"
-                className="block w-full px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
-              >
-                Go to Homepage
-              </Link>
-              <Link
-                href="/login"
-                className="block w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-              >
-                Sign In
-              </Link>
+
+          {/* Checkmark icon */}
+          <div className="flex justify-center mb-6">
+            <div className="w-16 h-16 rounded-2xl bg-[var(--green-dim)] border border-[var(--green-border)] flex items-center justify-center">
+              <svg className="w-8 h-8 text-[var(--green)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
             </div>
           </div>
+
+          <h1 className="font-[family-name:var(--font-bricolage)] text-2xl font-bold text-[var(--text)] mb-3">
+            Request submitted
+          </h1>
+          <p className="text-[var(--text-2)] text-sm mb-8 leading-relaxed">
+            Your registration request is under review. We&apos;ll email you once it&apos;s been approved.
+          </p>
+
+          <div className="flex flex-col gap-3">
+            <Link
+              href="/"
+              className="w-full px-4 py-2.5 bg-[var(--green)] hover:bg-green-400 text-black rounded-lg font-semibold text-sm transition-all duration-150 text-center"
+            >
+              Back to homepage
+            </Link>
+            <Link
+              href="/login"
+              className="w-full px-4 py-2.5 border border-[var(--border)] hover:border-[var(--text-3)] text-[var(--text-2)] hover:text-[var(--text)] rounded-lg font-semibold text-sm transition-all duration-150 text-center"
+            >
+              Sign in
+            </Link>
+          </div>
         </div>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-8">
-      <div className="max-w-md w-full bg-black rounded-lg shadow-lg p-8">
+    <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center px-4 py-12">
+      <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-green-600/5 blur-[120px]" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-sm">
+        {/* Back link */}
         <button
           onClick={() => router.push("/")}
-          className="mb-4 text-gray-400 hover:text-white transition-colors flex items-center gap-2"
+          className="inline-flex items-center gap-1.5 text-sm text-[var(--text-2)] hover:text-[var(--text)] transition-colors mb-8 group cursor-pointer"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-150" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
           </svg>
-          Back to Home
+          Time for Tennis
         </button>
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold mb-2 text-white">Request Access</h1>
-          <p className="text-gray-300">
-            Sign up for Time for Tennis court notifications
+
+        {/* Card */}
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-8">
+          <h1 className="font-[family-name:var(--font-bricolage)] text-2xl font-bold text-[var(--text)] mb-1">
+            Request access
+          </h1>
+          <p className="text-sm text-[var(--text-2)] mb-6">
+            Get notified when London tennis courts become available.
           </p>
+
+          {message && (
+            <div
+              className={`mb-5 px-4 py-3 rounded-lg text-sm ${
+                message.type === "success"
+                  ? "bg-[var(--green-dim)] border border-[var(--green-border)] text-[var(--green)]"
+                  : "bg-red-500/10 border border-red-500/20 text-[var(--red)]"
+              }`}
+            >
+              {message.text}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-xs font-medium text-[var(--text-2)] mb-1.5">
+                Email address <span className="text-[var(--red)]">*</span>
+              </label>
+              <input
+                type="email"
+                id="email"
+                required
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[var(--green)] focus:ring-1 focus:ring-[var(--green-border)] placeholder:text-[var(--text-3)] transition-all duration-150"
+                placeholder="your@email.com"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="name" className="block text-xs font-medium text-[var(--text-2)] mb-1.5">
+                Name <span className="text-[var(--text-3)]">(optional)</span>
+              </label>
+              <input
+                type="text"
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="w-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[var(--green)] focus:ring-1 focus:ring-[var(--green-border)] placeholder:text-[var(--text-3)] transition-all duration-150"
+                placeholder="Your name"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="reason" className="block text-xs font-medium text-[var(--text-2)] mb-1.5">
+                Why do you want access? <span className="text-[var(--red)]">*</span>
+              </label>
+              <textarea
+                id="reason"
+                required
+                value={formData.reason}
+                onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                className="w-full bg-[var(--surface-2)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[var(--green)] focus:ring-1 focus:ring-[var(--green-border)] placeholder:text-[var(--text-3)] transition-all duration-150 resize-none min-h-[80px]"
+                placeholder="Tell us why you'd like to use Time for Tennis"
+                minLength={10}
+              />
+              <p className={`text-xs mt-1 tabular-nums font-[family-name:var(--font-mono)] ${
+                formData.reason.length >= 10 ? "text-[var(--green)]" : "text-[var(--text-3)]"
+              }`}>
+                {formData.reason.length}/10 min characters
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full px-4 py-2.5 bg-[var(--green)] hover:bg-green-400 text-black rounded-lg font-semibold text-sm transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-[0_0_16px_rgba(34,197,94,0.15)] mt-1"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block w-4 h-4 rounded-full border-2 border-black border-t-transparent animate-spin" />
+                  Submitting...
+                </span>
+              ) : (
+                "Submit request"
+              )}
+            </button>
+          </form>
         </div>
 
-        {message && (
-          <div
-            className={`mb-6 p-4 rounded-lg ${
-              message.type === "success"
-                ? "bg-green-900/30 border border-green-700 text-green-200"
-                : "bg-red-900/30 border border-red-700 text-red-200"
-            }`}
-          >
-            <p className="text-sm">{message.text}</p>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-2 text-white">
-              Email Address *
-            </label>
-            <input
-              type="email"
-              id="email"
-              required
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full p-3 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white placeholder-gray-400"
-              placeholder="your@email.com"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium mb-2 text-white">
-              Name (optional)
-            </label>
-            <input
-              type="text"
-              id="name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full p-3 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white placeholder-gray-400"
-              placeholder="Your name"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="reason" className="block text-sm font-medium mb-2 text-white">
-              Why do you want access? *
-            </label>
-            <textarea
-              id="reason"
-              required
-              value={formData.reason}
-              onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-              className="w-full p-3 border border-gray-600 rounded-lg bg-[#0a0a0a] text-white placeholder-gray-400 min-h-[100px]"
-              placeholder="Tell us why you'd like to use Time for Tennis (minimum 10 characters)"
-              minLength={10}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              {formData.reason.length}/10 characters minimum
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full px-4 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? "Submitting..." : "Submit Request"}
-          </button>
-        </form>
-
-        <div className="mt-6 text-center text-sm text-gray-300">
+        <p className="text-center text-xs text-[var(--text-3)] mt-4">
           Already approved?{" "}
-          <Link href="/login" className="text-green-400 hover:underline font-medium">
+          <Link href="/login" className="text-[var(--text-2)] hover:text-[var(--text)] transition-colors">
             Sign in
           </Link>
-        </div>
+        </p>
       </div>
-    </main>
+    </div>
   );
 }

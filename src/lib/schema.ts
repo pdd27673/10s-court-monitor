@@ -124,6 +124,16 @@ export const registrationRequests = sqliteTable(
   })
 );
 
+// Tracks scraping schedule for each venue-date combination
+export const scrapeTargets = sqliteTable("scrape_targets", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  venueSlug: text("venue_slug").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  lastScrapedAt: text("last_scraped_at"), // ISO timestamp
+  nextScrapeAt: text("next_scrape_at"), // ISO timestamp - when next scrape is due
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
 // ============================================
 // NextAuth tables (JWT sessions - no sessions table needed)
 // ============================================
@@ -152,3 +162,4 @@ export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type NotificationLogEntry = typeof notificationLog.$inferSelect;
 export type VerificationToken = typeof verificationTokens.$inferSelect;
 export type RegistrationRequest = typeof registrationRequests.$inferSelect;
+export type ScrapeTarget = typeof scrapeTargets.$inferSelect;

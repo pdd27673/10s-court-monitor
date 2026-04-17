@@ -23,7 +23,6 @@ export async function POST(request: Request) {
     // Handle message updates
     if (update.message) {
       const chatId = update.message.chat.id;
-      const messageText = update.message.text || "";
       const firstName = update.message.chat.first_name || "there";
 
       // Respond with chat ID

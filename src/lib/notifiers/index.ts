@@ -2,8 +2,10 @@ import { db } from "../db";
 import { notificationChannels, notificationLog, watches } from "../schema";
 import { SlotChange } from "../differ";
 import { sendTelegramMessage, formatSlotChangesForTelegram } from "./telegram";
-import { sendEmail, formatSlotChangesForEmail } from "./email";
+import { sendEmail, formatSlotChangesForEmail, sendScrapeFailureAlert, sendScrapeSummary } from "./email";
 import { eq, and } from "drizzle-orm";
+
+export { sendScrapeFailureAlert, sendScrapeSummary };
 
 // Check if a slot matches a user's watch preferences
 function matchesWatch(
@@ -25,7 +27,7 @@ function matchesWatch(
   // Check day of week and time preferences
   const date = new Date(change.date);
   const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  
+
   // Map day of week to day name
   const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const dayName = dayNames[dayOfWeek];
@@ -45,10 +47,10 @@ function matchesWatch(
     // Fall back to legacy weekday/weekend format
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const timesJson = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
-    
+
     // If no times configured for this day type, skip
     if (!timesJson) return false;
-    
+
     try {
       preferredTimes = JSON.parse(timesJson);
     } catch {
@@ -69,7 +71,7 @@ function matchesWatch(
   return true;
 }
 
-// Send notifications for slot changes
+// Send notifications for slot changes — one bundled notification per user per channel
 export async function notifyUsers(changes: SlotChange[]) {
   if (changes.length === 0) return;
 
@@ -85,30 +87,46 @@ export async function notifyUsers(changes: SlotChange[]) {
     venueIdMap[v.slug] = v.id;
   }
 
-  // For each watch, find matching changes and notify
+  // Collect all matching slot changes per user (across ALL their watches).
+  // Using a Map<userId, Set<SlotChange>> so duplicate slots (matched by >1 watch) are deduplicated.
+  const userChanges = new Map<number, Set<SlotChange>>();
+
   for (const watch of activeWatches) {
+    if (!watch.userId) continue;
+
     const matchingChanges = changes.filter((c) =>
       matchesWatch(c, watch, venueIdMap)
     );
 
     if (matchingChanges.length === 0) continue;
 
-    // Get notification channels for this user
+    if (!userChanges.has(watch.userId)) {
+      userChanges.set(watch.userId, new Set());
+    }
+    for (const change of matchingChanges) {
+      userChanges.get(watch.userId)!.add(change);
+    }
+  }
+
+  // For each user, send ONE notification per channel with all their matched slots bundled
+  for (const [userId, changesSet] of userChanges) {
+    const allMatchingChanges = [...changesSet];
+
+    // Get this user's active notification channels
     const channels = await db.query.notificationChannels.findMany({
       where: and(
-        eq(notificationChannels.userId, watch.userId!),
+        eq(notificationChannels.userId, userId),
         eq(notificationChannels.active, 1)
       ),
     });
 
     for (const channel of channels) {
-      // Check if we already notified for these slots (prevent duplicates)
+      // Filter out slots already notified via this channel (dedup)
       const notifiedSlots: SlotChange[] = [];
 
-      for (const change of matchingChanges) {
+      for (const change of allMatchingChanges) {
         const slotKey = `${change.venue}:${change.date}:${change.time}:${change.court}`;
 
-        // Check if already notified
         const existing = await db.query.notificationLog.findFirst({
           where: and(
             eq(notificationLog.channelId, channel.id),
@@ -124,9 +142,8 @@ export async function notifyUsers(changes: SlotChange[]) {
       if (notifiedSlots.length === 0) continue;
 
       try {
-        // Send notification based on channel type
         let notificationSent = false;
-        
+
         if (channel.type === "telegram") {
           const message = formatSlotChangesForTelegram(notifiedSlots);
           await sendTelegramMessage(channel.destination, message);
@@ -138,10 +155,9 @@ export async function notifyUsers(changes: SlotChange[]) {
         } else {
           // Unsupported channel type (e.g., whatsapp)
           console.error(
-            `Unsupported notification channel type: ${channel.type} for user ${watch.userId}. ` +
+            `Unsupported notification channel type: ${channel.type} for user ${userId}. ` +
             `Channel ID: ${channel.id}. Notification not sent.`
           );
-          // Don't log as sent - skip this channel
           continue;
         }
 
@@ -150,19 +166,19 @@ export async function notifyUsers(changes: SlotChange[]) {
           for (const change of notifiedSlots) {
             const slotKey = `${change.venue}:${change.date}:${change.time}:${change.court}`;
             await db.insert(notificationLog).values({
-              userId: watch.userId,
+              userId,
               channelId: channel.id,
               slotKey,
             });
           }
 
           console.log(
-            `Notified user ${watch.userId} via ${channel.type}: ${notifiedSlots.length} slots`
+            `Notified user ${userId} via ${channel.type}: ${notifiedSlots.length} slot(s) bundled`
           );
         }
       } catch (error) {
         console.error(
-          `Failed to notify user ${watch.userId} via ${channel.type}:`,
+          `Failed to notify user ${userId} via ${channel.type}:`,
           error
         );
         // Don't log as sent if there was an error

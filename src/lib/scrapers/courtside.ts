@@ -1,5 +1,79 @@
 import * as cheerio from "cheerio";
+import UserAgent from "user-agents";
+import { courtLabelImpliesCoaching } from "../coaching-label";
+import { proxyManager, proxyFetch } from "../proxy-manager";
 import { ScrapedSlot } from "./types";
+
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 1000;
+
+function getHeaders(userAgent: string): Record<string, string> {
+  return {
+    "User-Agent": userAgent,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9,en-US;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    DNT: "1",
+    Connection: "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
+    Referer: "https://www.google.com/",
+  };
+}
+
+async function fetchWithRetry(
+  url: string,
+  venueSlug: string,
+  date: string
+): Promise<string> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const userAgent = new UserAgent({ deviceCategory: "desktop" }).toString();
+    const agent = proxyManager.getAgent();
+
+    try {
+      console.log(`📍 Courtside ${venueSlug} | ${date} | ${agent ? "proxy" : "DIRECT"} | attempt ${attempt}`);
+
+      const response = await proxyFetch(url, {
+        agent,
+        headers: getHeaders(userAgent),
+        timeout: 15000,
+      });
+
+      const html = response.body;
+
+      // Check for blocking
+      if (response.status === 404) {
+        const isBlocked = html.includes("blocked") || html.includes("denied") || html.includes("captcha");
+        throw new Error(isBlocked ? "IP blocked (404)" : "HTTP 404");
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      if (html.includes("Access Denied") || html.includes("403 Forbidden") || html.length < 100) {
+        throw new Error("Blocked or empty response");
+      }
+
+      return html;
+    } catch (error) {
+      lastError = error as Error;
+      console.log(`   ❌ ${venueSlug}: ${lastError.message}`);
+
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY));
+      }
+    }
+  }
+
+  throw new Error(`Failed after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+}
 
 export async function scrapeCourtside(
   venueSlug: string,
@@ -7,40 +81,37 @@ export async function scrapeCourtside(
 ): Promise<ScrapedSlot[]> {
   const url = `https://tennistowerhamlets.com/book/courts/${venueSlug}/${date}`;
 
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; TennisNotifier/1.0)",
-      Accept: "text/html",
-    },
-  });
+  const html = await fetchWithRetry(url, venueSlug, date);
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}: ${response.status}`);
-  }
-
-  const html = await response.text();
   const $ = cheerio.load(html);
   const slots: ScrapedSlot[] = [];
 
-  // Parse the availability table
   $("table tr").each((_, row) => {
     const timeEl = $(row).find("th.time");
     const time = timeEl.text().trim();
     if (!time) return;
 
-    // Each court is in a label.court element
     $(row)
       .find("label.court")
       .each((_, courtLabel) => {
-        const checkbox = $(courtLabel).find('input[type="checkbox"]');
         const button = $(courtLabel).find("span.button");
         const priceSpan = $(courtLabel).find("span.price");
 
-        // Extract court name (e.g., "Court 1", "Court 2")
-        const buttonText = button.clone().children().remove().end().text().trim();
+        const buttonText = button
+          .clone()
+          .children()
+          .remove()
+          .end()
+          .text()
+          .trim();
         const court = buttonText || "Unknown";
 
-        // Determine status from button class
+        // Skip non-tennis courts
+        const NON_TENNIS_KEYWORDS = ["cricket", "netball", "football", "basketball", "bowls", "bowling", "padel", "paddle"];
+        if (NON_TENNIS_KEYWORDS.some((kw) => court.toLowerCase().includes(kw))) {
+          return;
+        }
+
         let status: "available" | "booked" | "closed" | "coaching";
         let price: string | undefined;
 
@@ -50,11 +121,10 @@ export async function scrapeCourtside(
         } else if (button.hasClass("booked")) {
           status = "booked";
         } else if (button.hasClass("coaching") || button.hasClass("class")) {
-          // Coaching or class sessions
           status = "coaching";
         } else {
-          // maintenance or other = closed
-          status = "closed";
+          const combinedText = `${court} ${button.text()}`;
+          status = courtLabelImpliesCoaching(combinedText) ? "coaching" : "closed";
         }
 
         slots.push({
