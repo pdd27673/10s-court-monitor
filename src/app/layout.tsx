@@ -25,7 +25,9 @@ export const metadata: Metadata = {
   title: "Time for Tennis",
   description: "Get notified when tennis courts become available across London",
   icons: {
-    icon: "/icon.svg",
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: "/icon.svg",
   },
 };
 

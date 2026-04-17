@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandMark } from "@/components/BrandMark";
 import { db } from "@/lib/db";
 import { venues, slots, notificationLog } from "@/lib/schema";
 import { count } from "drizzle-orm";
@@ -33,16 +34,10 @@ export default async function Home() {
       {/* ─── Nav bar ─── */}
       <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[var(--bg)]/90 backdrop-blur-md">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-[var(--green-dim)] border border-[var(--green-border)] flex items-center justify-center">
-              <svg className="w-4 h-4 text-[var(--green)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="3" strokeWidth="2"/>
-                <path strokeLinecap="round" strokeWidth="2" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z"/>
-                <path strokeLinecap="round" strokeWidth="1.5" d="M2 12h20M12 2c-3 4-3 12 0 20M12 2c3 4 3 12 0 20"/>
-              </svg>
-            </div>
+          <Link href="/" className="flex items-center gap-2 group">
+            <BrandMark className="w-7 h-7 group-hover:opacity-90 transition-opacity" />
             <span className="font-[family-name:var(--font-bricolage)] font-bold text-sm tracking-tight">Time for Tennis</span>
-          </div>
+          </Link>
           <div className="flex items-center gap-2">
             <Link
               href="/dashboard?guest=true"

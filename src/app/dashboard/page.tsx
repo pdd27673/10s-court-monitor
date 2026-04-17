@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState, Fragment, useCallback, useRef } from "re
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { courtLabelImpliesCoaching } from "@/lib/coaching-label";
 import { VENUES } from "@/lib/constants";
 import { getBookingUrl } from "@/lib/utils/link-helpers";
 import { SiteNav } from "@/components/layout/SiteNav";
@@ -847,8 +848,14 @@ function DashboardContent() {
       if (!slotsByTimeAndVenue[time][venueSlug]) {
         slotsByTimeAndVenue[time][venueSlug] = { available: 0, booked: 0, closed: 0, coaching: 0, prices: [] };
       }
+
+      // Courtside: "Group coaching" in court label but missing coaching/class CSS → stored as closed
+      const status =
+        slot.status === "closed" && courtLabelImpliesCoaching(slot.court)
+          ? "coaching"
+          : slot.status;
       
-      if (slot.status === "available") {
+      if (status === "available") {
         slotsByTimeAndVenue[time][venueSlug].available++;
         // Extract numeric price from string like "£10.00"
         if (slot.price) {
@@ -857,11 +864,11 @@ function DashboardContent() {
             slotsByTimeAndVenue[time][venueSlug].prices.push(parseFloat(priceMatch[0]));
           }
         }
-      } else if (slot.status === "booked") {
+      } else if (status === "booked") {
         slotsByTimeAndVenue[time][venueSlug].booked++;
-      } else if (slot.status === "closed") {
+      } else if (status === "closed") {
         slotsByTimeAndVenue[time][venueSlug].closed++;
-      } else if (slot.status === "coaching") {
+      } else if (status === "coaching") {
         slotsByTimeAndVenue[time][venueSlug].coaching++;
       }
     }
@@ -1198,18 +1205,10 @@ function DashboardContent() {
                   </thead>
                   <tbody className="divide-y divide-[var(--border-subtle)]">
                     {sortedTimes.map((time) => {
-                      const isWatchMatch = isAuthenticated && selectedVenueInfo.some((v) =>
-                        slotMatchesWatch(time, v.slug, selectedDate)
-                      );
                       return (
-                      <tr key={time} className={`transition-colors duration-100 hover:bg-[var(--surface)] ${isWatchMatch ? "border-l-2 border-l-[var(--green)]" : ""}`}>
-                        <td className={`px-4 py-2.5 sticky left-0 z-10 border-r border-[var(--border)] bg-[var(--bg)] ${isWatchMatch ? "text-[var(--green)]" : "text-[var(--text-2)]"}`}>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-[family-name:var(--font-mono)] text-sm tabular-nums">{time}</span>
-                            {isWatchMatch && (
-                              <span title="Matches your watch" className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[var(--green)] text-black text-[8px] font-bold shrink-0">★</span>
-                            )}
-                          </div>
+                      <tr key={time} className="transition-colors duration-100 hover:bg-[var(--surface)]">
+                        <td className="px-4 py-2.5 sticky left-0 z-10 border-r border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)]">
+                          <span className="font-[family-name:var(--font-mono)] text-sm tabular-nums">{time}</span>
                         </td>
                         {selectedVenueInfo.map((venue) => {
                           const venueData = slotsByTimeAndVenue[time]?.[venue.slug] || {
@@ -1250,8 +1249,23 @@ function DashboardContent() {
                             statusText = "Closed";
                           }
 
+                          const cellMatchesWatch =
+                            hasAvailable &&
+                            isAuthenticated &&
+                            slotMatchesWatch(time, venue.slug, selectedDate);
+
                           const cellContent = (
-                            <div className={`px-2 py-2 rounded-lg text-center text-xs font-medium min-h-[52px] flex flex-col justify-center gap-0.5 ${statusClass}`}>
+                            <div
+                              className={`relative px-2 py-2 rounded-lg text-center text-xs font-medium min-h-[52px] flex flex-col justify-center gap-0.5 ${statusClass}`}
+                            >
+                              {cellMatchesWatch && (
+                                <span
+                                  title="Your watch covers this time — courts available to book"
+                                  className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[var(--green)] text-black text-[8px] font-bold z-10 pointer-events-none"
+                                >
+                                  ★
+                                </span>
+                              )}
                               <div className="font-semibold">{statusText}</div>
                               {showCount && total > 0 && (
                                 <div className="opacity-70">
@@ -1311,7 +1325,7 @@ function DashboardContent() {
             {isAuthenticated && watches.some(w => w.active) && (
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[var(--green)] text-black text-[8px] font-bold">★</span>
-                <span>Matches your watch</span>
+                <span>Watch match — bookable</span>
               </div>
             )}
           </div>
@@ -1478,7 +1492,7 @@ function DashboardContent() {
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-sm ${
                     selectionMode
-                      ? "bg-blue-500 text-white hover:bg-blue-700"
+                      ? "bg-[var(--green)] text-black hover:bg-green-400"
                       : "bg-[var(--surface-2)] text-[var(--text)] hover:bg-[var(--surface-3)]"
                   }`}
                   title="Bulk delete watches"
@@ -1522,7 +1536,7 @@ function DashboardContent() {
               <div className="space-y-6">
                 {/* Bulk Actions Bar */}
                 {selectionMode && selectedWatchIds.size > 0 && (
-                  <div className="sticky top-0 z-10 bg-[var(--surface)] border-2 border-blue-500 rounded-lg p-4 shadow-lg">
+                  <div className="sticky top-0 z-10 bg-[var(--surface)] border-2 border-[var(--green)] rounded-lg p-4 shadow-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-medium text-[var(--text)]">
@@ -1605,26 +1619,20 @@ function DashboardContent() {
                 )}
 
                 {(() => {
-                  // Color palette for watches
-                  const WATCH_COLORS = [
-                    { bg: 'bg-blue-500', bgLight: 'bg-blue-100', bgDark: 'dark:bg-blue-900/30', text: 'text-blue-700', textDark: 'dark:text-blue-300', border: 'border-blue-500', borderLight: 'border-blue-200', borderDark: 'dark:border-blue-800' },
-                    { bg: 'bg-purple-500', bgLight: 'bg-purple-100', bgDark: 'dark:bg-purple-900/30', text: 'text-purple-700', textDark: 'dark:text-purple-300', border: 'border-purple-500', borderLight: 'border-purple-200', borderDark: 'dark:border-purple-800' },
-                    { bg: 'bg-pink-500', bgLight: 'bg-pink-100', bgDark: 'dark:bg-pink-900/30', text: 'text-pink-700', textDark: 'dark:text-pink-300', border: 'border-pink-500', borderLight: 'border-pink-200', borderDark: 'dark:border-pink-800' },
-                    { bg: 'bg-indigo-500', bgLight: 'bg-indigo-100', bgDark: 'dark:bg-indigo-900/30', text: 'text-indigo-700', textDark: 'dark:text-indigo-300', border: 'border-indigo-500', borderLight: 'border-indigo-200', borderDark: 'dark:border-indigo-800' },
-                    { bg: 'bg-cyan-500', bgLight: 'bg-cyan-100', bgDark: 'dark:bg-cyan-900/30', text: 'text-cyan-700', textDark: 'dark:text-cyan-300', border: 'border-cyan-500', borderLight: 'border-cyan-200', borderDark: 'dark:border-cyan-800' },
-                    { bg: 'bg-emerald-500', bgLight: 'bg-emerald-100', bgDark: 'dark:bg-emerald-900/30', text: 'text-emerald-700', textDark: 'dark:text-emerald-300', border: 'border-emerald-500', borderLight: 'border-emerald-200', borderDark: 'dark:border-emerald-800' },
-                    { bg: 'bg-amber-500', bgLight: 'bg-amber-100', bgDark: 'dark:bg-amber-900/30', text: 'text-amber-700', textDark: 'dark:text-amber-300', border: 'border-amber-500', borderLight: 'border-amber-200', borderDark: 'dark:border-amber-800' },
-                    { bg: 'bg-orange-500', bgLight: 'bg-orange-100', bgDark: 'dark:bg-orange-900/30', text: 'text-orange-700', textDark: 'dark:text-orange-300', border: 'border-orange-500', borderLight: 'border-orange-200', borderDark: 'dark:border-orange-800' },
-                  ];
+                  /** Single theme for all watches (matches app --green) */
+                  const WATCH_DISPLAY_COLOR = {
+                    bg: "bg-[var(--green)]",
+                    bgLight: "bg-[var(--green-dim)]",
+                    border: "border-[var(--green-border)]",
+                  } as const;
 
-                  // Assign colors to watches
-                  const watchesWithColors = watches.map((watch, index) => ({
+                  const watchesWithColors = watches.map((watch) => ({
                     ...watch,
-                    color: WATCH_COLORS[index % WATCH_COLORS.length],
-                  })) as Array<Watch & { color: typeof WATCH_COLORS[0] }>;
+                    color: WATCH_DISPLAY_COLOR,
+                  })) as Array<Watch & { color: typeof WATCH_DISPLAY_COLOR }>;
 
                   // Group watches by venue
-                  type WatchWithColor = Watch & { color: typeof WATCH_COLORS[0] };
+                  type WatchWithColor = Watch & { color: typeof WATCH_DISPLAY_COLOR };
                   const groupedWatches = watchesWithColors.reduce((acc, watch) => {
                     const venueKey = watch.venueName ?? "Other";
                     if (!acc[venueKey]) {
@@ -1667,16 +1675,20 @@ function DashboardContent() {
                               </span>
                             </div>
                           </div>
-                          {/* Watch Color Legend */}
-                          <div className="flex flex-wrap gap-3 mt-2">
-                            {venueWatches.map((watch) => (
-                              <div key={watch.id} className="flex items-center gap-1.5">
-                                <div className={`w-3 h-3 rounded-full ${watch.color.bg}`}></div>
-                                <span className="text-xs text-[var(--text-2)]">
-                                  {watch.venueName || 'Watch'} {watch.active ? '' : '(Paused)'}
+                          <div className="flex items-start gap-2 mt-2 text-xs text-[var(--text-2)]">
+                            <span
+                              className="mt-0.5 w-3 h-3 rounded-full bg-[var(--green)] shrink-0"
+                              aria-hidden
+                            />
+                            <span>
+                              {venueWatches.map((w, i) => (
+                                <span key={w.id}>
+                                  {i > 0 ? " · " : ""}
+                                  {w.venueName || "Watch"}
+                                  {!w.active ? " (paused)" : ""}
                                 </span>
-                              </div>
-                            ))}
+                              ))}
+                            </span>
                           </div>
                         </div>
 
@@ -1727,9 +1739,9 @@ function DashboardContent() {
                                             return (
                                               <div
                                                 key={watch.id}
-                                                className={`flex-1 min-w-[20px] h-6 rounded ${watch.color.bgLight} ${watch.color.bgDark} border ${watch.color.borderLight} ${watch.color.borderDark} flex items-center justify-center cursor-pointer transition-all ${
-                                                  isSelected ? 'ring-2 ring-blue-500' : ''
-                                                } ${!watch.active ? 'opacity-50' : ''}`}
+                                                className={`flex-1 min-w-[20px] h-6 rounded ${watch.color.bgLight} border ${watch.color.border} flex items-center justify-center cursor-pointer transition-all ${
+                                                  isSelected ? "ring-2 ring-[var(--green)] ring-offset-2 ring-offset-[var(--bg)]" : ""
+                                                } ${!watch.active ? "opacity-50" : ""}`}
                                                 title={`${watch.venueName || 'Watch'} - ${time} ${day}`}
                                                 onClick={() => {
                                                   if (selectionMode) {
@@ -1775,7 +1787,7 @@ function DashboardContent() {
                                 key={watch.id}
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
                                   isSelected
-                                    ? "bg-blue-50 border-blue-500"
+                                    ? "bg-[var(--green-dim)] border-[var(--green)]"
                                     : "bg-[var(--surface)] border-[var(--border)]"
                                 }`}
                               >
@@ -2295,6 +2307,18 @@ function WatchFormModal({
     });
   };
 
+  /** Days affected by Quick Presets — matches the All / Weekdays / Weekends tab */
+  const getPresetTargetDays = (): readonly (typeof DAYS[number])[] => {
+    switch (dayViewTab) {
+      case "weekdays":
+        return WEEKDAYS;
+      case "weekends":
+        return WEEKENDS;
+      default:
+        return DAYS;
+    }
+  };
+
   // Preset templates
   const applyPreset = (preset: 'evening' | 'morning' | 'afternoon' | 'all-day') => {
     let times: string[] = [];
@@ -2322,7 +2346,7 @@ function WatchFormModal({
         times = [...timeSlots];
         break;
     }
-    applyToDays(DAYS, times);
+    applyToDays(getPresetTargetDays(), times);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -2432,8 +2456,8 @@ function WatchFormModal({
                   watch 
                     ? 'bg-[var(--surface-2)] border-[var(--border)] cursor-not-allowed opacity-60'
                     : selectedVenues.length > 0
-                    ? 'bg-green-50 border-green-300 hover:bg-green-100 cursor-pointer'
-                    : 'bg-[var(--surface)] border-[var(--border)] hover:border-green-400 cursor-pointer'
+                    ? 'bg-[var(--green-dim)] border-[var(--green-border)] hover:bg-[rgba(34,197,94,0.18)] hover:border-[var(--green)] cursor-pointer'
+                    : 'bg-[var(--surface)] border-[var(--border)] hover:border-[var(--green)]/50 cursor-pointer'
                 }`}
                 disabled={!!watch}
               >
@@ -2605,6 +2629,7 @@ function WatchFormModal({
               <button
                 type="button"
                 onClick={() => {
+                  setDayViewTab("weekdays");
                   const weekdaysTimes = WEEKDAYS.flatMap(day => dayTimes[day]);
                   const mostCommonTimes = weekdaysTimes.length > 0 
                     ? [...new Set(weekdaysTimes)].sort()
@@ -2618,6 +2643,7 @@ function WatchFormModal({
               <button
                 type="button"
                 onClick={() => {
+                  setDayViewTab("weekends");
                   const weekendTimes = WEEKENDS.flatMap(day => dayTimes[day]);
                   const mostCommonTimes = weekendTimes.length > 0 
                     ? [...new Set(weekendTimes)].sort()
@@ -2772,7 +2798,7 @@ function WatchFormModal({
                               className={`p-1.5 rounded text-xs font-medium border-2 transition-all cursor-pointer ${
                                 dayTimes[day].includes(time)
                                   ? "bg-[var(--green)] text-black border-[var(--green)] shadow-sm"
-                                  : "bg-[var(--surface)] border-[var(--border)] hover:bg-green-50 hover:border-green-400"
+                                  : "bg-[var(--surface)] border-[var(--border)] hover:bg-[var(--green-dim)] hover:border-[var(--green-border)]"
                               }`}
                             >
                               {time}
@@ -2953,6 +2979,17 @@ function BulkEditWatchModal({
     });
   };
 
+  const getPresetTargetDays = (): readonly (typeof DAYS[number])[] => {
+    switch (dayViewTab) {
+      case "weekdays":
+        return WEEKDAYS;
+      case "weekends":
+        return WEEKENDS;
+      default:
+        return DAYS;
+    }
+  };
+
   const applyPreset = (preset: 'evening' | 'morning' | 'afternoon' | 'all-day') => {
     let times: string[] = [];
     switch (preset) {
@@ -2977,7 +3014,7 @@ function BulkEditWatchModal({
         times = [...timeSlots];
         break;
     }
-    applyToDays(DAYS, times);
+    applyToDays(getPresetTargetDays(), times);
   };
 
   const getDaysToDisplay = () => {
@@ -3073,6 +3110,7 @@ function BulkEditWatchModal({
               <button
                 type="button"
                 onClick={() => {
+                  setDayViewTab("weekdays");
                   const weekdaysTimes = WEEKDAYS.flatMap(day => dayTimes[day]);
                   const mostCommonTimes = weekdaysTimes.length > 0 
                     ? [...new Set(weekdaysTimes)].sort()
@@ -3086,6 +3124,7 @@ function BulkEditWatchModal({
               <button
                 type="button"
                 onClick={() => {
+                  setDayViewTab("weekends");
                   const weekendTimes = WEEKENDS.flatMap(day => dayTimes[day]);
                   const mostCommonTimes = weekendTimes.length > 0 
                     ? [...new Set(weekendTimes)].sort()
@@ -3207,7 +3246,7 @@ function BulkEditWatchModal({
                           className={`p-1.5 rounded text-xs font-medium border-2 transition-all cursor-pointer ${
                             dayTimes[day].includes(time)
                               ? "bg-[var(--green)] text-black border-[var(--green)] shadow-sm"
-                              : "bg-[var(--surface)] border-[var(--border)] hover:bg-green-50 hover:border-green-400"
+                              : "bg-[var(--surface)] border-[var(--border)] hover:bg-[var(--green-dim)] hover:border-[var(--green-border)]"
                           }`}
                         >
                           {time}
@@ -3725,7 +3764,7 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                           {user.isAllowed ? "Allowed" : "Not Allowed"}
                         </span>
                         {user.isAdmin === 1 && (
-                          <span className="inline-block px-2 py-0.5 text-xs rounded bg-purple-100 text-purple-700 w-fit">
+                          <span className="inline-block px-2 py-0.5 text-xs rounded w-fit bg-purple-500/15 text-purple-300 border border-purple-500/30">
                             Admin
                           </span>
                         )}
@@ -3740,23 +3779,23 @@ function AdminUsers({ showMessage }: { showMessage: (type: "success" | "error", 
                       <div className="flex gap-1 justify-end">
                         <button
                           onClick={() => handleToggleAllowed(user.id, user.isAllowed)}
-                          className={`px-2 py-1 text-xs rounded ${
+                          className={`px-2 py-1 text-xs rounded border transition-colors ${
                             user.isAllowed
-                              ? "bg-red-100 hover:bg-red-200"
-                              : "bg-green-100 hover:bg-green-200"
+                              ? "bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] border-[var(--red)]/25"
+                              : "bg-[var(--green)]/10 hover:bg-[var(--green)]/20 text-[var(--green)] border-[var(--green)]/25"
                           }`}
                         >
                           {user.isAllowed ? "Revoke" : "Allow"}
                         </button>
                         <button
                           onClick={() => handleToggleAdmin(user.id, user.isAdmin)}
-                          className="px-2 py-1 text-xs bg-purple-100 hover:bg-purple-200 rounded"
+                          className="px-2 py-1 text-xs rounded border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] hover:bg-[var(--surface-3)] transition-colors"
                         >
                           {user.isAdmin ? "Remove Admin" : "Make Admin"}
                         </button>
                         <button
                           onClick={() => handleDeleteUser(user.id, user.email)}
-                          className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
+                          className="px-2 py-1 text-xs rounded border transition-colors bg-[var(--red)]/10 hover:bg-[var(--red)]/20 text-[var(--red)] border-[var(--red)]/25"
                         >
                           Delete
                         </button>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BrandMark } from "@/components/BrandMark";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useState } from "react";
@@ -41,13 +42,7 @@ export function SiteNav({ userEmail, isAdmin, activeTab, onTabChange, isGuest }:
           href="/"
           className="flex items-center gap-2 shrink-0 group"
         >
-          <div className="w-7 h-7 rounded-lg bg-[var(--green-dim)] border border-[var(--green-border)] flex items-center justify-center group-hover:bg-[var(--green)]/20 transition-all duration-150">
-            <svg className="w-4 h-4 text-[var(--green)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="3" strokeWidth="2"/>
-              <path strokeLinecap="round" strokeWidth="2" d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z"/>
-              <path strokeLinecap="round" strokeWidth="1.5" d="M2 12h20M12 2c-3 4-3 12 0 20M12 2c3 4 3 12 0 20"/>
-            </svg>
-          </div>
+          <BrandMark className="w-7 h-7 group-hover:opacity-90 transition-opacity" />
           <span className="font-[family-name:var(--font-bricolage)] font-bold text-sm tracking-tight text-[var(--text)]">TFT</span>
         </Link>
 
