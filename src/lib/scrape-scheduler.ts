@@ -7,23 +7,25 @@ import { eq, and, lt, lte, isNull, or } from "drizzle-orm";
 /**
  * Scrape Scheduler - Tiered frequency based on day offset
  *
- * Day 0 (today):    10 min until 6pm, then 4 hours (stop after 6pm)
- * Day 1 (tomorrow): 10 min (highest frequency)
- * Day 2:            20 min (half of day 1)
- * Day 3:            40 min (half of day 2)
- * Days 4-7:         60 min (once an hour)
+ * Day 0 (today):    10 min until 6pm, then 4 hours
+ * Day 1 (tomorrow): 10 min
+ * Day 2:            10 min
+ * Day 3:            20 min
+ * Day 4:            30 min
+ * Days 5-8:         60 min (once an hour)
  */
 
 // Frequency in minutes for each day offset
 const SCRAPE_INTERVALS: Record<number, number> = {
   0: 10, // Today: 10 min (but stop after 6pm)
   1: 10, // Tomorrow: highest frequency
-  2: 20, // Half of day 1
-  3: 40, // Half of day 2
-  4: 60, // Once an hour
-  5: 60,
-  6: 60,
-  7: 60,
+  2: 10, // 2 days from now: 10 min
+  3: 20, // Half of day 3
+  4: 30, // twice an hour
+  5: 60, // once an hour
+  6: 60, // once an hour
+  7: 60, // once an hour
+  8: 60, // once an hour
 };
 
 // After this hour (local time), day 0 switches to 4-hour intervals
@@ -191,7 +193,7 @@ export async function cleanupOldTargets(): Promise<number> {
  * Main scraping function - scrapes only targets that are due
  * Call this from the cron job (every 10 minutes)
  */
-export async function runScheduledScrape(daysAhead: number = 8): Promise<ScheduledScrapeResult> {
+export async function runScheduledScrape(daysAhead: number = 9): Promise<ScheduledScrapeResult> {
   const dates = getNextNDays(daysAhead);
 
   // Ensure all targets exist
@@ -242,7 +244,7 @@ export async function runScheduledScrape(daysAhead: number = 8): Promise<Schedul
   // ClubSpark: one request per venue covers the full scraping window
   const today = new Date().toISOString().split("T")[0];
   const windowEndDate = new Date();
-  windowEndDate.setDate(windowEndDate.getDate() + 7);
+  windowEndDate.setDate(windowEndDate.getDate() + 9);
   const windowEnd = windowEndDate.toISOString().split("T")[0];
 
   for (const [, targets] of clubsparkByVenue) {

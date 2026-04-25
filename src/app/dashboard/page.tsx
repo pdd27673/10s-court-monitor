@@ -149,11 +149,13 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function getNext7Days(): string[] {
+const DASHBOARD_DAYS = 9;
+
+function getNextDays(): string[] {
   const dates: string[] = [];
   const today = new Date();
 
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < DASHBOARD_DAYS; i++) {
     const date = new Date(today);
     date.setDate(today.getDate() + i);
     dates.push(date.toISOString().split("T")[0]);
@@ -228,12 +230,12 @@ function DashboardContent() {
   const [selectedDate, setSelectedDate] = useState(() => {
     if (typeof window !== "undefined") {
       const prefs = loadDashboardPreferences();
-      const dates = getNext7Days();
+      const dates = getNextDays();
       return prefs.selectedDate && dates.includes(prefs.selectedDate) 
         ? prefs.selectedDate 
         : dates[0];
     }
-    return getNext7Days()[0];
+    return getNextDays()[0];
   });
 
   const [availability, setAvailability] = useState<VenueAvailability | null>(
@@ -308,7 +310,7 @@ function DashboardContent() {
     "7pm", "8pm", "9pm", "10pm",
   ];
 
-  const dates = getNext7Days();
+  const dates = getNextDays();
   const isAuthenticated = status === "authenticated";
 
   // Redirect unauthenticated non-guests to login
@@ -4326,7 +4328,7 @@ function AdminSystem({ showMessage }: { showMessage: (type: "success" | "error",
         <div className="mb-4">
           <h2 className="text-lg font-semibold mb-2">Manual Scrape</h2>
           <p className="text-sm text-[var(--text-2)]">
-            Trigger a manual scrape of all venues for the next 7 days. This will also notify
+            Trigger a manual scrape of all venues for the next 9 days. This will also notify
             users of any newly available slots.
           </p>
         </div>

@@ -98,7 +98,7 @@ export default function SystemManagement() {
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Manual Scrape</h2>
             </div>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Trigger a manual scrape of all venues for the next 7 days. This will also notify
+              Trigger a manual scrape of all venues for the next 9 days. This will also notify
               users of any newly available slots.
             </p>
           </div>
