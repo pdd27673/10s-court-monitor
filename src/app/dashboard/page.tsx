@@ -248,6 +248,8 @@ function DashboardContent() {
   const [watches, setWatches] = useState<Watch[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [alertsPage, setAlertsPage] = useState(0);
+  const ALERTS_PER_PAGE = 10;
   const [loadingWatches, setLoadingWatches] = useState(false);
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -1363,7 +1365,9 @@ function DashboardContent() {
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-[var(--text)] uppercase tracking-widest">Recent Alerts</h2>
                 {matches.length > 0 && (
-                  <span className="text-xs text-[var(--text-3)]">Last {matches.length} notified slots</span>
+                  <span className="text-xs text-[var(--text-3)]">
+                    {alertsPage * ALERTS_PER_PAGE + 1}–{Math.min((alertsPage + 1) * ALERTS_PER_PAGE, matches.length)} of {matches.length}
+                  </span>
                 )}
               </div>
               {loadingMatches ? (
@@ -1388,7 +1392,7 @@ function DashboardContent() {
               ) : (
                 <div className="border border-[var(--border)] rounded-xl overflow-hidden">
                   <div className="divide-y divide-[var(--border-subtle)]">
-                    {matches.map((match) => {
+                    {matches.slice(alertsPage * ALERTS_PER_PAGE, (alertsPage + 1) * ALERTS_PER_PAGE).map((match) => {
                       const isAvailable = match.currentStatus === "available";
                       const isExpired = match.isExpired || match.currentStatus === "expired";
                       const isTaken = !isAvailable && !isExpired;
@@ -1443,6 +1447,33 @@ function DashboardContent() {
                       );
                     })}
                   </div>
+                  {matches.length > ALERTS_PER_PAGE && (
+                    <div className="flex items-center justify-between px-4 py-2.5 border-t border-[var(--border)] bg-[var(--surface)]">
+                      <button
+                        onClick={() => setAlertsPage((p) => Math.max(0, p - 1))}
+                        disabled={alertsPage === 0}
+                        className="flex items-center gap-1 text-xs text-[var(--text-2)] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Prev
+                      </button>
+                      <span className="text-xs text-[var(--text-3)]">
+                        Page {alertsPage + 1} / {Math.ceil(matches.length / ALERTS_PER_PAGE)}
+                      </span>
+                      <button
+                        onClick={() => setAlertsPage((p) => Math.min(Math.ceil(matches.length / ALERTS_PER_PAGE) - 1, p + 1))}
+                        disabled={(alertsPage + 1) * ALERTS_PER_PAGE >= matches.length}
+                        className="flex items-center gap-1 text-xs text-[var(--text-2)] hover:text-[var(--text)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Next
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
