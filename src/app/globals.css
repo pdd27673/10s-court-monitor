@@ -1,18 +1,79 @@
 @import "tailwindcss";
 
+/* ── Design tokens ───────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --gt-bg: #0e1117;
+  --gt-surface: #161b24;
+  --gt-surface-hover: #1e2535;
+  --gt-border: #252d3a;
+  --gt-text: #e2e8f0;
+  --gt-muted: #64748b;
+  --gt-accent: #0d9488;
+  --gt-accent-light: #14b8a6;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.light {
+  --gt-bg: #f8fafc;
+  --gt-surface: #ffffff;
+  --gt-surface-hover: #f1f5f9;
+  --gt-border: #e2e8f0;
+  --gt-text: #0f172a;
+  --gt-muted: #94a3b8;
+  --gt-accent: #0d9488;
+  --gt-accent-light: #14b8a6;
 }
+
+/* ── Base ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { color-scheme: dark; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background-color: var(--gt-bg);
+  color: var(--gt-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ── Tailwind v4 color tokens ────────────────────── */
+@theme {
+  --color-gt-bg: var(--gt-bg);
+  --color-gt-surface: var(--gt-surface);
+  --color-gt-surface-hover: var(--gt-surface-hover);
+  --color-gt-border: var(--gt-border);
+  --color-gt-text: var(--gt-text);
+  --color-gt-muted: var(--gt-muted);
+  --color-gt-accent: var(--gt-accent);
+  --color-gt-accent-light: var(--gt-accent-light);
+}
+
+/* ── Scrollbar ───────────────────────────────────── */
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--gt-border) transparent; }
+.scrollbar-thin::-webkit-scrollbar { height: 4px; width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--gt-border); border-radius: 2px; }
+
+/* ── Component helpers ───────────────────────────── */
+.gt-surface-card { background-color: var(--gt-surface); border: 1px solid var(--gt-border); }
+
+.gt-btn-ghost {
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--gt-muted);
+  border: 1px solid var(--gt-border);
+  background-color: var(--gt-surface);
+  transition: color 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.gt-btn-ghost:hover { color: var(--gt-text); border-color: var(--gt-accent); }
+
+/* ── Misc ────────────────────────────────────────── */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+.pb-safe { padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px)); }
+
+@media (prefers-reduced-motion: reduce) { .animate-pulse { animation: none; } }
