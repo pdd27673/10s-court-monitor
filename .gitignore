@@ -49,5 +49,5 @@ next-env.d.ts
 # claude
 .claude/*
 
-# docs
-docs/*
+# docs (tracked for GitHub Pages)
+# docs/*

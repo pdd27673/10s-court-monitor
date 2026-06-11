@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wada Palette Archive — Sanzo Wada's Dictionary of Color Combinations</title>
+<meta name="description" content="A digital companion to Sanzo Wada's A Dictionary of Color Combinations. Browse 200 beautiful color palettes from the 1930s Japanese reference work.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#F6F1E7;
+  --surface:#FBF8F2;
+  --text:#1A1814;
+  --text-muted:#6B6357;
+  --border:#E0D8CC;
+  --accent:#8B6B4A;
+  --shadow:0 2px 12px rgba(26,24,20,.08);
+  --shadow-lg:0 8px 32px rgba(26,24,20,.16);
+  --font-serif:'Playfair Display',Georgia,serif;
+  --font-sans:'IBM Plex Sans',system-ui,sans-serif;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-weight:300;line-height:1.6;min-height:100vh}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:0 2rem;height:60px;display:flex;align-items:center;justify-content:space-between;background:rgba(246,241,231,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.nav-logo{font-family:var(--font-serif);font-size:1rem;color:var(--text);text-decoration:none;letter-spacing:.02em}
+.nav-links{display:flex;gap:2rem;list-style:none}
+.nav-links a{color:var(--text-muted);text-decoration:none;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;transition:color .2s}
+.nav-links a:hover{color:var(--text)}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:8rem 2rem 4rem}
+.hero-eyebrow{font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;color:var(--text-muted);margin-bottom:1.5rem}
+.hero-title{font-family:var(--font-serif);font-size:clamp(2.4rem,5.5vw,4.8rem);font-weight:400;line-height:1.1;letter-spacing:-.01em;margin-bottom:1.5rem;max-width:680px}
+.hero-title em{font-style:italic;color:var(--accent)}
+.hero-sub{font-size:.95rem;color:var(--text-muted);max-width:460px;margin:0 auto 3rem;line-height:1.75}
+.hero-swatches{display:flex;gap:3px;margin-bottom:3rem;border-radius:2px;overflow:hidden}
+.hero-swatch{width:56px;height:160px;transition:width .4s ease}
+.hero-swatches:hover .hero-swatch{width:44px}
+.hero-swatches .hero-swatch:hover{width:120px}
+.btn{display:inline-block;padding:.75rem 2.5rem;background:var(--text);color:var(--bg);text-decoration:none;font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;border:none;cursor:pointer;transition:opacity .2s;font-family:var(--font-sans);font-weight:400}
+.btn:hover{opacity:.75}
+
+/* STATS */
+.stats-bar{background:var(--text);color:var(--bg);padding:1.75rem 2rem;display:flex;justify-content:center;gap:5rem}
+.stat-num{font-family:var(--font-serif);font-size:2rem;display:block;margin-bottom:.1rem}
+.stat-label{font-size:.65rem;letter-spacing:.18em;text-transform:uppercase;opacity:.5}
+
+/* FILTER BAR */
+.filter-bar{position:sticky;top:60px;z-index:90;background:var(--bg);border-bottom:1px solid var(--border);padding:.875rem 2rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+.search-input{flex:1;min-width:180px;max-width:300px;padding:.45rem 1rem;border:1px solid var(--border);background:var(--surface);font-family:var(--font-sans);font-size:.82rem;color:var(--text);outline:none;transition:border-color .2s;border-radius:0}
+.search-input:focus{border-color:var(--text)}
+.search-input::placeholder{color:var(--text-muted)}
+.filter-btns{display:flex;gap:.4rem}
+.filter-btn{padding:.35rem .9rem;border:1px solid var(--border);background:transparent;font-family:var(--font-sans);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;color:var(--text-muted);transition:all .15s;border-radius:0}
+.filter-btn:hover,.filter-btn.active{background:var(--text);color:var(--bg);border-color:var(--text)}
+.result-count{margin-left:auto;font-size:.75rem;color:var(--text-muted)}
+
+/* GRID */
+.archive{max-width:1500px;margin:0 auto;padding:2px}
+.palette-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1px;background:var(--border)}
+.palette-card{background:var(--surface);cursor:pointer;transition:transform .2s,box-shadow .2s;position:relative}
+.palette-card:hover{transform:translateY(-3px);z-index:1;box-shadow:var(--shadow-lg)}
+.swatch-row{display:flex;height:130px}
+.swatch{flex:1}
+.card-info{padding:.875rem 1rem}
+.card-num{font-size:.65rem;color:var(--text-muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.2rem}
+.card-names{font-size:.78rem;color:var(--text);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-badge{display:inline-block;font-size:.6rem;letter-spacing:.07em;padding:.1rem .35rem;background:var(--border);color:var(--text-muted);margin-top:.45rem;text-transform:uppercase}
+.empty{grid-column:1/-1;padding:5rem;text-align:center;color:var(--text-muted);font-size:.9rem;background:var(--surface)}
+
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(26,24,20,.72);z-index:200;display:flex;align-items:center;justify-content:center;padding:2rem;opacity:0;pointer-events:none;transition:opacity .25s}
+.overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--surface);max-width:660px;width:100%;max-height:90vh;overflow-y:auto;transform:translateY(20px);transition:transform .25s;position:relative}
+.overlay.open .modal{transform:translateY(0)}
+.modal-close{position:absolute;top:1rem;right:1rem;background:rgba(26,24,20,.5);border:none;cursor:pointer;color:#fff;font-size:1.25rem;width:32px;height:32px;display:flex;align-items:center;justify-content:center;z-index:1;border-radius:50%;line-height:1;transition:background .15s}
+.modal-close:hover{background:var(--text)}
+.modal-swatches{display:flex;height:200px}
+.modal-swatch{flex:1}
+.modal-body{padding:2rem}
+.modal-num{font-size:.7rem;letter-spacing:.18em;text-transform:uppercase;color:var(--text-muted);margin-bottom:.75rem}
+.modal-title{font-family:var(--font-serif);font-size:1.6rem;font-weight:400;margin-bottom:2rem;line-height:1.2}
+.color-list{display:flex;flex-direction:column;gap:.6rem;margin-bottom:2rem}
+.color-row{display:flex;align-items:center;gap:1rem;padding:.7rem;background:var(--bg)}
+.color-chip{width:42px;height:42px;flex-shrink:0;border-radius:2px}
+.color-meta{flex:1}
+.color-name{font-size:.88rem;font-weight:400;margin-bottom:.15rem}
+.color-hex{font-size:.72rem;color:var(--text-muted);font-family:monospace;letter-spacing:.04em}
+.copy-btn{padding:.28rem .65rem;border:1px solid var(--border);background:transparent;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);color:var(--text-muted);transition:all .15s;white-space:nowrap}
+.copy-btn:hover{background:var(--text);color:var(--bg);border-color:var(--text)}
+.copy-btn.copied{background:#2A5E34;color:#fff;border-color:#2A5E34}
+.modal-nav{display:flex;gap:.75rem;flex-wrap:wrap;padding-top:1.5rem;border-top:1px solid var(--border)}
+.modal-nav-btn{padding:.5rem 1.25rem;border:1px solid var(--border);background:transparent;font-family:var(--font-sans);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;color:var(--text-muted);transition:all .15s}
+.modal-nav-btn:hover{background:var(--text);color:var(--bg);border-color:var(--text)}
+
+/* ABOUT */
+.about{background:var(--text);color:var(--bg);padding:7rem 2rem}
+.about-inner{max-width:700px;margin:0 auto}
+.about-eyebrow{font-size:.65rem;letter-spacing:.22em;text-transform:uppercase;opacity:.45;margin-bottom:2rem}
+.about-title{font-family:var(--font-serif);font-size:2.4rem;font-weight:400;line-height:1.2;margin-bottom:2rem}
+.about-body{font-size:.95rem;line-height:1.9;opacity:.78;margin-bottom:1.25rem}
+.about-credit{font-size:.72rem;opacity:.35;margin-top:3rem;padding-top:2rem;border-top:1px solid rgba(246,241,231,.1)}
+
+/* FOOTER */
+footer{padding:1.75rem 2rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:.72rem;color:var(--text-muted);flex-wrap:wrap;gap:.5rem}
+
+/* TOAST */
+.toast{position:fixed;bottom:2rem;left:50%;transform:translateX(-50%) translateY(10px);background:var(--text);color:var(--bg);padding:.65rem 1.5rem;font-size:.75rem;letter-spacing:.06em;z-index:400;opacity:0;transition:all .25s;pointer-events:none;border-radius:2px}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border)}
+
+@media(max-width:768px){
+  .nav-links{gap:1.2rem}
+  .stats-bar{gap:2.5rem}
+  .hero-swatch{width:38px;height:110px}
+  .palette-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+  .filter-bar{padding:.65rem 1rem}
+  .about{padding:4rem 1.5rem}
+}
+@media(max-width:480px){
+  .palette-grid{grid-template-columns:repeat(2,1fr)}
+  .stats-bar{gap:1.5rem;flex-wrap:wrap;justify-content:center}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-logo" href="#home">Wada Palette Archive</a>
+  <ul class="nav-links">
+    <li><a href="#archive" onclick="scrollToArchive(event)">Archive</a></li>
+    <li><a href="#about">About</a></li>
+  </ul>
+</nav>
+
+<section id="home" class="hero">
+  <p class="hero-eyebrow">Sanzo Wada · 1930s · 200 Combinations</p>
+  <h1 class="hero-title">A Dictionary of<br><em>Color Combinations</em></h1>
+  <p class="hero-sub">The definitive digital companion to Sanzo Wada's legendary reference work — browse, search, and explore every palette from the original Japanese color archive.</p>
+  <div class="hero-swatches" id="hero-swatches"></div>
+  <a href="#archive" class="btn" onclick="scrollToArchive(event)">Browse the Archive</a>
+</section>
+
+<div class="stats-bar">
+  <div><span class="stat-num">200</span><span class="stat-label">Combinations</span></div>
+  <div><span class="stat-num">2–4</span><span class="stat-label">Colors each</span></div>
+  <div><span class="stat-num">1930s</span><span class="stat-label">Original era</span></div>
+</div>
+
+<div class="filter-bar" id="filter-bar">
+  <input class="search-input" id="search" type="text" placeholder="Search by color name…" oninput="applyFilters()">
+  <div class="filter-btns">
+    <button class="filter-btn active" data-f="all" onclick="setFilter(this)">All</button>
+    <button class="filter-btn" data-f="2" onclick="setFilter(this)">2 Colors</button>
+    <button class="filter-btn" data-f="3" onclick="setFilter(this)">3 Colors</button>
+    <button class="filter-btn" data-f="4" onclick="setFilter(this)">4 Colors</button>
+  </div>
+  <span class="result-count" id="result-count">200 palettes</span>
+</div>
+
+<section id="archive" class="archive">
+  <div class="palette-grid" id="palette-grid"></div>
+</section>
+
+<section id="about" class="about">
+  <div class="about-inner">
+    <p class="about-eyebrow">About the Archive</p>
+    <h2 class="about-title">Sanzo Wada and the Dictionary of Color Combinations</h2>
+    <p class="about-body">Sanzo Wada (1883–1967) was a Japanese painter, dyeing craftsman, and influential color theorist whose deep understanding of pigment and harmony informed a generation of Japanese designers, textile artists, and craftspeople.</p>
+    <p class="about-body">His foundational work, <em>Haishoku Soukan</em> (配色総観), first published in the 1930s, catalogued hundreds of color combinations drawn from nature, tradition, and fine art. The book was later translated and published in English as <em>A Dictionary of Color Combinations</em>, finding new audiences among graphic designers, interior decorators, fashion professionals, and fine artists worldwide.</p>
+    <p class="about-body">Each combination in Wada's dictionary is presented without hierarchy — there is no "best" pairing, only relationships. Colors speak through proximity, proportion, and contrast. This archive preserves that editorial spirit: every palette is shown as a full composition, with equal weight given to each color.</p>
+    <p class="about-body">The 200 combinations presented here are drawn from Wada's original framework, using traditional Western and Eastern pigment names that Wada himself employed — Prussian Blue, Vermilion, Gamboge, Celadon — alongside English descriptive equivalents. Hex values are modern digital approximations of the original printed inks.</p>
+    <p class="about-credit">This is an independent digital reference project. <em>A Dictionary of Color Combinations</em> is published by Seigensha Art Publishing. All palette concepts trace to the original work of Sanzo Wada.</p>
+  </div>
+</section>
+
+<footer>
+  <span>Wada Palette Archive</span>
+  <span>A digital companion to <em>A Dictionary of Color Combinations</em> by Sanzo Wada</span>
+</footer>
+
+<div class="overlay" id="overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div class="modal-swatches" id="modal-swatches"></div>
+    <div class="modal-body">
+      <p class="modal-num" id="modal-num"></p>
+      <h2 class="modal-title" id="modal-title"></h2>
+      <div class="color-list" id="color-list"></div>
+      <div class="modal-nav">
+        <button class="modal-nav-btn" onclick="navigatePalette(-1)">← Previous</button>
+        <button class="modal-nav-btn" onclick="navigatePalette(1)">Next →</button>
+        <button class="modal-nav-btn" onclick="copyAll()">Copy All HEX</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PALETTES = [
+  {id:1,colors:[{name:"Ivory",hex:"#F4EDD4"},{name:"Venetian Red",hex:"#9B3A28"}]},
+  {id:2,colors:[{name:"Pale Gold",hex:"#E8D098"},{name:"Prussian Blue",hex:"#1C3A5C"}]},
+  {id:3,colors:[{name:"Cream",hex:"#F0E6C8"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:4,colors:[{name:"Vermilion",hex:"#C03820"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:5,colors:[{name:"Ash Grey",hex:"#B0AA9E"},{name:"Indigo",hex:"#2C2E6C"}]},
+  {id:6,colors:[{name:"Peach",hex:"#F0B89A"},{name:"Deep Brown",hex:"#3C2016"}]},
+  {id:7,colors:[{name:"Sage Green",hex:"#8A9E78"},{name:"Burgundy",hex:"#5C1A1A"}]},
+  {id:8,colors:[{name:"Powder Blue",hex:"#A8C4D4"},{name:"Burnt Sienna",hex:"#8A3A1E"}]},
+  {id:9,colors:[{name:"Straw",hex:"#E4D09C"},{name:"Cobalt Blue",hex:"#1A4890"}]},
+  {id:10,colors:[{name:"Rose",hex:"#DC7A8C"},{name:"Deep Navy",hex:"#1A1E3E"}]},
+  {id:11,colors:[{name:"Lilac",hex:"#B898C8"},{name:"Forest Green",hex:"#2A4E2E"}]},
+  {id:12,colors:[{name:"Terracotta",hex:"#B85C38"},{name:"Pale Sage",hex:"#C8D4B4"}]},
+  {id:13,colors:[{name:"Steel Blue",hex:"#4E6E8E"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:14,colors:[{name:"Rust",hex:"#A84020"},{name:"Cool Grey",hex:"#8A8E96"}]},
+  {id:15,colors:[{name:"Cerulean",hex:"#3A7EAE"},{name:"Sand",hex:"#D8C89A"}]},
+  {id:16,colors:[{name:"Moss Green",hex:"#5A6E38"},{name:"Dusty Rose",hex:"#C48A96"}]},
+  {id:17,colors:[{name:"Ochre",hex:"#C8901C"},{name:"Deep Teal",hex:"#1C4A4A"}]},
+  {id:18,colors:[{name:"Violet",hex:"#5A3A8A"},{name:"Pale Yellow",hex:"#F0E2A0"}]},
+  {id:19,colors:[{name:"Umber",hex:"#5A3C1E"},{name:"Sky Blue",hex:"#7AB4CE"}]},
+  {id:20,colors:[{name:"Coral",hex:"#E07060"},{name:"Navy",hex:"#1C2A4E"}]},
+  {id:21,colors:[{name:"Jade",hex:"#3A7A5E"},{name:"Crimson",hex:"#8A1A2E"}]},
+  {id:22,colors:[{name:"Amber",hex:"#D48818"},{name:"Slate Blue",hex:"#3E5280"}]},
+  {id:23,colors:[{name:"Mauve",hex:"#AA7898"},{name:"Olive",hex:"#5E6430"}]},
+  {id:24,colors:[{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Deep Purple",hex:"#3E1E5C"}]},
+  {id:25,colors:[{name:"Buff",hex:"#E4CCA0"},{name:"Prussian Blue",hex:"#1C3A5C"}]},
+  {id:26,colors:[{name:"Salmon",hex:"#E89078"},{name:"Moss",hex:"#4A5E2E"}]},
+  {id:27,colors:[{name:"Cobalt",hex:"#1A4890"},{name:"Chrome Yellow",hex:"#E8C418"}]},
+  {id:28,colors:[{name:"Lavender",hex:"#C0A8D4"},{name:"Chocolate",hex:"#4A2010"}]},
+  {id:29,colors:[{name:"Sea Green",hex:"#3A7A64"},{name:"Terracotta",hex:"#B85C38"}]},
+  {id:30,colors:[{name:"Puce",hex:"#9E5E6A"},{name:"Sage",hex:"#8A9E78"}]},
+  {id:31,colors:[{name:"Naples Yellow",hex:"#F2D878"},{name:"Indigo",hex:"#2C2E6C"}]},
+  {id:32,colors:[{name:"Bice Blue",hex:"#3A6A9E"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:33,colors:[{name:"Burnt Umber",hex:"#6E3018"},{name:"Cool White",hex:"#EEF0F2"}]},
+  {id:34,colors:[{name:"Aubergine",hex:"#3E1E34"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:35,colors:[{name:"Teal",hex:"#1E6868"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:36,colors:[{name:"Scarlet",hex:"#BE1C1C"},{name:"Ash Grey",hex:"#A0A09A"}]},
+  {id:37,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Gold",hex:"#D4A420"}]},
+  {id:38,colors:[{name:"Wisteria",hex:"#9A7EB4"},{name:"Olive Green",hex:"#5E6430"}]},
+  {id:39,colors:[{name:"Raw Sienna",hex:"#B87840"},{name:"Cobalt Blue",hex:"#1A4890"}]},
+  {id:40,colors:[{name:"Rose Pink",hex:"#E898AA"},{name:"Forest Green",hex:"#2A4E2E"}]},
+  {id:41,colors:[{name:"Ultramarine",hex:"#1E2A8E"},{name:"Naples Yellow",hex:"#F2D878"}]},
+  {id:42,colors:[{name:"Cinnabar",hex:"#C43820"},{name:"Deep Teal",hex:"#1C4A4A"}]},
+  {id:43,colors:[{name:"Orchid",hex:"#C890C0"},{name:"Khaki",hex:"#B0A070"}]},
+  {id:44,colors:[{name:"Bronze",hex:"#9E7830"},{name:"Slate",hex:"#5A606E"}]},
+  {id:45,colors:[{name:"Celadon",hex:"#AAC8A8"},{name:"Burgundy",hex:"#5C1A1A"}]},
+  {id:46,colors:[{name:"Periwinkle",hex:"#7888BE"},{name:"Warm Beige",hex:"#E0CCA8"}]},
+  {id:47,colors:[{name:"Vermilion",hex:"#C03820"},{name:"Prussian Blue",hex:"#1C3A5C"}]},
+  {id:48,colors:[{name:"Putty",hex:"#C8BA98"},{name:"Ultramarine",hex:"#1E2A8E"}]},
+  {id:49,colors:[{name:"Viridian",hex:"#2A6858"},{name:"Pale Rose",hex:"#F0C4C4"}]},
+  {id:50,colors:[{name:"Umber",hex:"#5A3C1E"},{name:"Cerulean",hex:"#3A7EAE"}]},
+  {id:51,colors:[{name:"Chrome Green",hex:"#2A5E34"},{name:"Chrome Yellow",hex:"#E8C418"}]},
+  {id:52,colors:[{name:"Plum",hex:"#4E1E3E"},{name:"Gold",hex:"#D4A420"}]},
+  {id:53,colors:[{name:"Silver",hex:"#B8B8B8"},{name:"Deep Red",hex:"#7A1818"}]},
+  {id:54,colors:[{name:"Pale Violet",hex:"#C4AADC"},{name:"Moss Green",hex:"#5A6E38"}]},
+  {id:55,colors:[{name:"Sienna",hex:"#9A4820"},{name:"Steel Blue",hex:"#4E6E8E"}]},
+  {id:56,colors:[{name:"Emerald",hex:"#1E6E40"},{name:"Vermilion",hex:"#C03820"}]},
+  {id:57,colors:[{name:"Dusty Mauve",hex:"#AA8A98"},{name:"Dark Olive",hex:"#3E4420"}]},
+  {id:58,colors:[{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Burnt Sienna",hex:"#8A3A1E"}]},
+  {id:59,colors:[{name:"Gamboge",hex:"#DC9C18"},{name:"Indigo",hex:"#2C2E6C"}]},
+  {id:60,colors:[{name:"Shell Pink",hex:"#F4D4C4"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:61,colors:[{name:"Cerulean Blue",hex:"#3A7EAE"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:62,colors:[{name:"Auburn",hex:"#7E3010"},{name:"Pale Blue",hex:"#BED4E4"}]},
+  {id:63,colors:[{name:"Chartreuse",hex:"#9AAE1E"},{name:"Deep Purple",hex:"#3E1E5C"}]},
+  {id:64,colors:[{name:"Pale Lilac",hex:"#D4C0E0"},{name:"Forest Brown",hex:"#3A2010"}]},
+  {id:65,colors:[{name:"Jade Green",hex:"#3A7A5E"},{name:"Pale Ochre",hex:"#E4C880"}]},
+  {id:66,colors:[{name:"Deep Rose",hex:"#C04870"},{name:"Sage Green",hex:"#8A9E78"}]},
+  {id:67,colors:[{name:"Raw Umber",hex:"#6A4820"},{name:"Powder Blue",hex:"#A8C4D4"}]},
+  {id:68,colors:[{name:"Chrome Orange",hex:"#D06018"},{name:"Navy Blue",hex:"#1C2A4E"}]},
+  {id:69,colors:[{name:"Pale Green",hex:"#B4CC9E"},{name:"Plum",hex:"#4E1E3E"}]},
+  {id:70,colors:[{name:"Deep Cobalt",hex:"#142870"},{name:"Sand Yellow",hex:"#E0CC88"}]},
+  {id:71,colors:[{name:"Chinese Red",hex:"#BE2810"},{name:"Sea Green",hex:"#3A7A64"}]},
+  {id:72,colors:[{name:"Warm Beige",hex:"#E0CCA8"},{name:"Indigo Blue",hex:"#2C2E6C"}]},
+  {id:73,colors:[{name:"Forest Green",hex:"#2A4E2E"},{name:"Pale Rose",hex:"#F0C4C4"}]},
+  {id:74,colors:[{name:"Venetian Red",hex:"#9B3A28"},{name:"Slate Grey",hex:"#6E7A8A"}]},
+  {id:75,colors:[{name:"Periwinkle Blue",hex:"#7888BE"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:76,colors:[{name:"Dark Viridian",hex:"#1C5848"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:77,colors:[{name:"Coral Pink",hex:"#E07868"},{name:"Slate Blue",hex:"#3E5280"}]},
+  {id:78,colors:[{name:"Amber",hex:"#D48818"},{name:"Burgundy",hex:"#5C1A1A"}]},
+  {id:79,colors:[{name:"Pale Lavender",hex:"#D4C0E0"},{name:"Ochre",hex:"#C8901C"}]},
+  {id:80,colors:[{name:"Ivory",hex:"#F4EDD4"},{name:"Deep Navy",hex:"#1A1E3E"}]},
+  {id:81,colors:[{name:"Ivory",hex:"#F4EDD4"},{name:"Dusty Rose",hex:"#C48A96"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:82,colors:[{name:"Pale Blue",hex:"#BED4E4"},{name:"Cream",hex:"#F0E6C8"},{name:"Slate",hex:"#5A606E"}]},
+  {id:83,colors:[{name:"Sage",hex:"#8A9E78"},{name:"Ivory",hex:"#F4EDD4"},{name:"Sienna",hex:"#9A4820"}]},
+  {id:84,colors:[{name:"Cobalt",hex:"#1A4890"},{name:"Pale Gold",hex:"#E8D098"},{name:"Vermilion",hex:"#C03820"}]},
+  {id:85,colors:[{name:"Wisteria",hex:"#9A7EB4"},{name:"Sage Green",hex:"#8A9E78"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:86,colors:[{name:"Terracotta",hex:"#B85C38"},{name:"Cream",hex:"#F0E6C8"},{name:"Teal",hex:"#1E6868"}]},
+  {id:87,colors:[{name:"Deep Navy",hex:"#1A1E3E"},{name:"Sand",hex:"#D8C89A"},{name:"Coral",hex:"#E07060"}]},
+  {id:88,colors:[{name:"Plum",hex:"#4E1E3E"},{name:"Pale Gold",hex:"#E8D098"},{name:"Jade",hex:"#3A7A5E"}]},
+  {id:89,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Chrome Yellow",hex:"#E8C418"},{name:"Rose",hex:"#DC7A8C"}]},
+  {id:90,colors:[{name:"Olive",hex:"#5E6430"},{name:"Cream",hex:"#F0E6C8"},{name:"Rust",hex:"#A84020"}]},
+  {id:91,colors:[{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Ivory",hex:"#F4EDD4"},{name:"Burgundy",hex:"#5C1A1A"}]},
+  {id:92,colors:[{name:"Forest Green",hex:"#2A4E2E"},{name:"Pale Rose",hex:"#F0C4C4"},{name:"Gold",hex:"#D4A420"}]},
+  {id:93,colors:[{name:"Cerulean",hex:"#3A7EAE"},{name:"Warm White",hex:"#F6F0E2"},{name:"Raw Sienna",hex:"#B87840"}]},
+  {id:94,colors:[{name:"Lavender",hex:"#C0A8D4"},{name:"Sage",hex:"#8A9E78"},{name:"Umber",hex:"#5A3C1E"}]},
+  {id:95,colors:[{name:"Vermilion",hex:"#C03820"},{name:"Ivory",hex:"#F4EDD4"},{name:"Deep Teal",hex:"#1C4A4A"}]},
+  {id:96,colors:[{name:"Straw",hex:"#E4D09C"},{name:"Cobalt Blue",hex:"#1A4890"},{name:"Sienna",hex:"#9A4820"}]},
+  {id:97,colors:[{name:"Slate Blue",hex:"#3E5280"},{name:"Pearl",hex:"#E8E4DC"},{name:"Crimson",hex:"#8A1A2E"}]},
+  {id:98,colors:[{name:"Moss Green",hex:"#5A6E38"},{name:"Buff",hex:"#E4CCA0"},{name:"Deep Purple",hex:"#3E1E5C"}]},
+  {id:99,colors:[{name:"Rose Pink",hex:"#E898AA"},{name:"Deep Navy",hex:"#1A1E3E"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:100,colors:[{name:"Chocolate",hex:"#4A2010"},{name:"Celadon",hex:"#AAC8A8"},{name:"Pale Yellow",hex:"#F0E2A0"}]},
+  {id:101,colors:[{name:"Steel Blue",hex:"#4E6E8E"},{name:"Ivory",hex:"#F4EDD4"},{name:"Rust",hex:"#A84020"}]},
+  {id:102,colors:[{name:"Indigo",hex:"#2C2E6C"},{name:"Coral",hex:"#E07060"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:103,colors:[{name:"Sage Green",hex:"#8A9E78"},{name:"Dusty Rose",hex:"#C48A96"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:104,colors:[{name:"Aubergine",hex:"#3E1E34"},{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Gold",hex:"#D4A420"}]},
+  {id:105,colors:[{name:"Burnt Sienna",hex:"#8A3A1E"},{name:"Powder Blue",hex:"#A8C4D4"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:106,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Sand",hex:"#D8C89A"},{name:"Rose",hex:"#DC7A8C"}]},
+  {id:107,colors:[{name:"Pale Lilac",hex:"#D4C0E0"},{name:"Moss Green",hex:"#5A6E38"},{name:"Straw",hex:"#E4D09C"}]},
+  {id:108,colors:[{name:"Deep Red",hex:"#7A1818"},{name:"Steel Grey",hex:"#7A8090"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:109,colors:[{name:"Jade",hex:"#3A7A5E"},{name:"Pale Violet",hex:"#C4AADC"},{name:"Ochre",hex:"#C8901C"}]},
+  {id:110,colors:[{name:"Cobalt Blue",hex:"#1A4890"},{name:"Chrome Orange",hex:"#D06018"},{name:"Pearl",hex:"#E8E4DC"}]},
+  {id:111,colors:[{name:"Wisteria",hex:"#9A7EB4"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:112,colors:[{name:"Vermilion",hex:"#C03820"},{name:"Deep Teal",hex:"#1C4A4A"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:113,colors:[{name:"Ultramarine",hex:"#1E2A8E"},{name:"Pale Yellow",hex:"#F0E2A0"},{name:"Sienna",hex:"#9A4820"}]},
+  {id:114,colors:[{name:"Plum",hex:"#4E1E3E"},{name:"Sage",hex:"#8A9E78"},{name:"Sand",hex:"#D8C89A"}]},
+  {id:115,colors:[{name:"Teal",hex:"#1E6868"},{name:"Rose Pink",hex:"#E898AA"},{name:"Warm Beige",hex:"#E0CCA8"}]},
+  {id:116,colors:[{name:"Gamboge",hex:"#DC9C18"},{name:"Deep Navy",hex:"#1A1E3E"},{name:"Pale Blue",hex:"#BED4E4"}]},
+  {id:117,colors:[{name:"Chrome Green",hex:"#2A5E34"},{name:"Raw Sienna",hex:"#B87840"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:118,colors:[{name:"Dusty Mauve",hex:"#AA8A98"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:119,colors:[{name:"Venetian Red",hex:"#9B3A28"},{name:"Cobalt",hex:"#1A4890"},{name:"Naples Yellow",hex:"#F2D878"}]},
+  {id:120,colors:[{name:"Silver",hex:"#B8B8B8"},{name:"Deep Red",hex:"#7A1818"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:121,colors:[{name:"Celadon",hex:"#AAC8A8"},{name:"Plum",hex:"#4E1E3E"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:122,colors:[{name:"Amber",hex:"#D48818"},{name:"Steel Blue",hex:"#4E6E8E"},{name:"Pearl White",hex:"#F2EDE4"}]},
+  {id:123,colors:[{name:"Orchid",hex:"#C890C0"},{name:"Olive",hex:"#5E6430"},{name:"Warm Beige",hex:"#E0CCA8"}]},
+  {id:124,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Terracotta",hex:"#B85C38"},{name:"Sage Green",hex:"#8A9E78"}]},
+  {id:125,colors:[{name:"Pale Pink",hex:"#F4D4D4"},{name:"Indigo",hex:"#2C2E6C"},{name:"Gold",hex:"#D4A420"}]},
+  {id:126,colors:[{name:"Burgundy",hex:"#5C1A1A"},{name:"Sand",hex:"#D8C89A"},{name:"Slate Blue",hex:"#3E5280"}]},
+  {id:127,colors:[{name:"Raw Umber",hex:"#6A4820"},{name:"Cerulean",hex:"#3A7EAE"},{name:"Straw",hex:"#E4D09C"}]},
+  {id:128,colors:[{name:"Viridian",hex:"#2A6858"},{name:"Rose",hex:"#DC7A8C"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:129,colors:[{name:"Deep Cobalt",hex:"#142870"},{name:"Chrome Yellow",hex:"#E8C418"},{name:"Terracotta",hex:"#B85C38"}]},
+  {id:130,colors:[{name:"Lilac",hex:"#B898C8"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Pale Yellow",hex:"#F0E2A0"}]},
+  {id:131,colors:[{name:"Rust Orange",hex:"#A84020"},{name:"Deep Navy",hex:"#1A1E3E"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:132,colors:[{name:"Periwinkle",hex:"#7888BE"},{name:"Terracotta",hex:"#B85C38"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:133,colors:[{name:"Pale Teal",hex:"#7AB4A8"},{name:"Warm Beige",hex:"#E0CCA8"},{name:"Crimson",hex:"#8A1A2E"}]},
+  {id:134,colors:[{name:"Ochre",hex:"#C8901C"},{name:"Slate",hex:"#5A606E"},{name:"Pale Lilac",hex:"#D4C0E0"}]},
+  {id:135,colors:[{name:"Chinese Red",hex:"#BE2810"},{name:"Jade",hex:"#3A7A5E"},{name:"Pearl",hex:"#E8E4DC"}]},
+  {id:136,colors:[{name:"Deep Teal",hex:"#1C4A4A"},{name:"Dusty Rose",hex:"#C48A96"},{name:"Straw",hex:"#E4D09C"}]},
+  {id:137,colors:[{name:"Violet",hex:"#5A3A8A"},{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:138,colors:[{name:"Sienna Brown",hex:"#9A4820"},{name:"Steel Blue",hex:"#4E6E8E"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:139,colors:[{name:"Forest Green",hex:"#2A4E2E"},{name:"Coral",hex:"#E07060"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:140,colors:[{name:"Indigo Blue",hex:"#2C2E6C"},{name:"Pale Rose",hex:"#F0C4C4"},{name:"Gold",hex:"#D4A420"}]},
+  {id:141,colors:[{name:"Bronze",hex:"#9E7830"},{name:"Deep Purple",hex:"#3E1E5C"},{name:"Sage Green",hex:"#8A9E78"}]},
+  {id:142,colors:[{name:"Cerulean Blue",hex:"#3A7EAE"},{name:"Vermilion",hex:"#C03820"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:143,colors:[{name:"Celadon",hex:"#AAC8A8"},{name:"Burgundy",hex:"#5C1A1A"},{name:"Pale Yellow",hex:"#F0E2A0"}]},
+  {id:144,colors:[{name:"Mauve",hex:"#AA7898"},{name:"Olive Green",hex:"#5E6430"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:145,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Chrome Orange",hex:"#D06018"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:146,colors:[{name:"Deep Rose",hex:"#C04870"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Sand",hex:"#D8C89A"}]},
+  {id:147,colors:[{name:"Pale Violet",hex:"#C4AADC"},{name:"Terracotta",hex:"#B85C38"},{name:"Sage",hex:"#8A9E78"}]},
+  {id:148,colors:[{name:"Teal",hex:"#1E6868"},{name:"Gold",hex:"#D4A420"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:149,colors:[{name:"Shell Pink",hex:"#F4D4C4"},{name:"Slate Blue",hex:"#3E5280"},{name:"Olive",hex:"#5E6430"}]},
+  {id:150,colors:[{name:"Gamboge",hex:"#DC9C18"},{name:"Deep Teal",hex:"#1C4A4A"},{name:"Pale Rose",hex:"#F0C4C4"}]},
+  {id:151,colors:[{name:"Orchid",hex:"#C890C0"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:152,colors:[{name:"Cobalt Blue",hex:"#1A4890"},{name:"Terracotta",hex:"#B85C38"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:153,colors:[{name:"Rose Pink",hex:"#E898AA"},{name:"Sage Green",hex:"#8A9E78"},{name:"Warm Beige",hex:"#E0CCA8"}]},
+  {id:154,colors:[{name:"Deep Navy",hex:"#1A1E3E"},{name:"Straw",hex:"#E4D09C"},{name:"Coral",hex:"#E07060"}]},
+  {id:155,colors:[{name:"Viridian",hex:"#2A6858"},{name:"Pale Lilac",hex:"#D4C0E0"},{name:"Sand",hex:"#D8C89A"}]},
+  {id:156,colors:[{name:"Crimson",hex:"#8A1A2E"},{name:"Steel Blue",hex:"#4E6E8E"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:157,colors:[{name:"Wisteria",hex:"#9A7EB4"},{name:"Ochre",hex:"#C8901C"},{name:"Deep Navy",hex:"#1A1E3E"}]},
+  {id:158,colors:[{name:"Pale Teal",hex:"#7AB4A8"},{name:"Burgundy",hex:"#5C1A1A"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:159,colors:[{name:"Amber",hex:"#D48818"},{name:"Plum",hex:"#4E1E3E"},{name:"Celadon",hex:"#AAC8A8"}]},
+  {id:160,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Vermilion",hex:"#C03820"},{name:"Pale Gold",hex:"#E8D098"}]},
+  {id:161,colors:[{name:"Ivory",hex:"#F4EDD4"},{name:"Dusty Rose",hex:"#C48A96"},{name:"Sage Green",hex:"#8A9E78"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:162,colors:[{name:"Pale Blue",hex:"#BED4E4"},{name:"Cream",hex:"#F0E6C8"},{name:"Slate",hex:"#5A606E"},{name:"Coral",hex:"#E07060"}]},
+  {id:163,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Chrome Yellow",hex:"#E8C418"},{name:"Vermilion",hex:"#C03820"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:164,colors:[{name:"Plum",hex:"#4E1E3E"},{name:"Sage",hex:"#8A9E78"},{name:"Pale Gold",hex:"#E8D098"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:165,colors:[{name:"Forest Green",hex:"#2A4E2E"},{name:"Terracotta",hex:"#B85C38"},{name:"Ivory",hex:"#F4EDD4"},{name:"Deep Navy",hex:"#1A1E3E"}]},
+  {id:166,colors:[{name:"Cobalt Blue",hex:"#1A4890"},{name:"Sand",hex:"#D8C89A"},{name:"Crimson",hex:"#8A1A2E"},{name:"Sage Green",hex:"#8A9E78"}]},
+  {id:167,colors:[{name:"Wisteria",hex:"#9A7EB4"},{name:"Olive",hex:"#5E6430"},{name:"Pale Rose",hex:"#F0C4C4"},{name:"Gold",hex:"#D4A420"}]},
+  {id:168,colors:[{name:"Teal",hex:"#1E6868"},{name:"Ochre",hex:"#C8901C"},{name:"Ivory",hex:"#F4EDD4"},{name:"Deep Red",hex:"#7A1818"}]},
+  {id:169,colors:[{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Burgundy",hex:"#5C1A1A"},{name:"Cream",hex:"#F0E6C8"},{name:"Raw Sienna",hex:"#B87840"}]},
+  {id:170,colors:[{name:"Indigo",hex:"#2C2E6C"},{name:"Pale Yellow",hex:"#F0E2A0"},{name:"Rose Pink",hex:"#E898AA"},{name:"Moss",hex:"#5A6E38"}]},
+  {id:171,colors:[{name:"Chrome Green",hex:"#2A5E34"},{name:"Straw",hex:"#E4D09C"},{name:"Burnt Sienna",hex:"#8A3A1E"},{name:"Powder Blue",hex:"#A8C4D4"}]},
+  {id:172,colors:[{name:"Lavender",hex:"#C0A8D4"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Sand",hex:"#D8C89A"},{name:"Deep Rose",hex:"#C04870"}]},
+  {id:173,colors:[{name:"Ultramarine",hex:"#1E2A8E"},{name:"Chrome Orange",hex:"#D06018"},{name:"Pale Blue",hex:"#BED4E4"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:174,colors:[{name:"Sienna",hex:"#9A4820"},{name:"Deep Teal",hex:"#1C4A4A"},{name:"Pale Gold",hex:"#E8D098"},{name:"Lilac",hex:"#B898C8"}]},
+  {id:175,colors:[{name:"Burgundy",hex:"#5C1A1A"},{name:"Sage Green",hex:"#8A9E78"},{name:"Ivory",hex:"#F4EDD4"},{name:"Steel Blue",hex:"#4E6E8E"}]},
+  {id:176,colors:[{name:"Gamboge",hex:"#DC9C18"},{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Celadon",hex:"#AAC8A8"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:177,colors:[{name:"Dusty Mauve",hex:"#AA8A98"},{name:"Olive",hex:"#5E6430"},{name:"Straw",hex:"#E4D09C"},{name:"Cobalt",hex:"#1A4890"}]},
+  {id:178,colors:[{name:"Rose",hex:"#DC7A8C"},{name:"Deep Navy",hex:"#1A1E3E"},{name:"Pale Green",hex:"#B4CC9E"},{name:"Gold",hex:"#D4A420"}]},
+  {id:179,colors:[{name:"Vermilion",hex:"#C03820"},{name:"Jade",hex:"#3A7A5E"},{name:"Cream",hex:"#F0E6C8"},{name:"Slate Blue",hex:"#3E5280"}]},
+  {id:180,colors:[{name:"Periwinkle",hex:"#7888BE"},{name:"Terracotta",hex:"#B85C38"},{name:"Ivory",hex:"#F4EDD4"},{name:"Moss Green",hex:"#5A6E38"}]},
+  {id:181,colors:[{name:"Deep Purple",hex:"#3E1E5C"},{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Amber",hex:"#D48818"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:182,colors:[{name:"Viridian",hex:"#2A6858"},{name:"Pale Rose",hex:"#F0C4C4"},{name:"Deep Navy",hex:"#1A1E3E"},{name:"Sand",hex:"#D8C89A"}]},
+  {id:183,colors:[{name:"Ochre",hex:"#C8901C"},{name:"Wisteria",hex:"#9A7EB4"},{name:"Forest Green",hex:"#2A4E2E"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:184,colors:[{name:"Crimson",hex:"#8A1A2E"},{name:"Steel Blue",hex:"#4E6E8E"},{name:"Pale Gold",hex:"#E8D098"},{name:"Sage",hex:"#8A9E78"}]},
+  {id:185,colors:[{name:"Cobalt Blue",hex:"#1A4890"},{name:"Terracotta",hex:"#B85C38"},{name:"Pale Lilac",hex:"#D4C0E0"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:186,colors:[{name:"Teal",hex:"#1E6868"},{name:"Rose Pink",hex:"#E898AA"},{name:"Straw",hex:"#E4D09C"},{name:"Charcoal",hex:"#2A2724"}]},
+  {id:187,colors:[{name:"Plum",hex:"#4E1E3E"},{name:"Jade",hex:"#3A7A5E"},{name:"Gold",hex:"#D4A420"},{name:"Cream",hex:"#F0E6C8"}]},
+  {id:188,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Pale Rose",hex:"#F0C4C4"},{name:"Ochre",hex:"#C8901C"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:189,colors:[{name:"Burnt Umber",hex:"#6E3018"},{name:"Cerulean",hex:"#3A7EAE"},{name:"Pale Gold",hex:"#E8D098"},{name:"Sage Green",hex:"#8A9E78"}]},
+  {id:190,colors:[{name:"Deep Crimson",hex:"#7A1020"},{name:"Slate Blue",hex:"#3E5280"},{name:"Ivory",hex:"#F4EDD4"},{name:"Moss Green",hex:"#5A6E38"}]},
+  {id:191,colors:[{name:"Gamboge",hex:"#DC9C18"},{name:"Indigo",hex:"#2C2E6C"},{name:"Coral",hex:"#E07060"},{name:"Pale Blue",hex:"#BED4E4"}]},
+  {id:192,colors:[{name:"Sage Green",hex:"#8A9E78"},{name:"Deep Rose",hex:"#C04870"},{name:"Sand",hex:"#D8C89A"},{name:"Slate",hex:"#5A606E"}]},
+  {id:193,colors:[{name:"Chrome Green",hex:"#2A5E34"},{name:"Raw Sienna",hex:"#B87840"},{name:"Lavender",hex:"#C0A8D4"},{name:"Warm White",hex:"#F6F0E2"}]},
+  {id:194,colors:[{name:"Vermilion",hex:"#C03820"},{name:"Deep Teal",hex:"#1C4A4A"},{name:"Pale Yellow",hex:"#F0E2A0"},{name:"Wisteria",hex:"#9A7EB4"}]},
+  {id:195,colors:[{name:"Burgundy",hex:"#5C1A1A"},{name:"Pale Aqua",hex:"#A0D0C4"},{name:"Gold",hex:"#D4A420"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:196,colors:[{name:"Steel Blue",hex:"#4E6E8E"},{name:"Terracotta",hex:"#B85C38"},{name:"Pale Gold",hex:"#E8D098"},{name:"Forest Green",hex:"#2A4E2E"}]},
+  {id:197,colors:[{name:"Deep Navy",hex:"#1A1E3E"},{name:"Dusty Rose",hex:"#C48A96"},{name:"Olive",hex:"#5E6430"},{name:"Sand",hex:"#D8C89A"}]},
+  {id:198,colors:[{name:"Cerulean",hex:"#3A7EAE"},{name:"Crimson",hex:"#8A1A2E"},{name:"Pale Gold",hex:"#E8D098"},{name:"Sage Green",hex:"#8A9E78"}]},
+  {id:199,colors:[{name:"Ochre",hex:"#C8901C"},{name:"Plum",hex:"#4E1E3E"},{name:"Pale Teal",hex:"#7AB4A8"},{name:"Ivory",hex:"#F4EDD4"}]},
+  {id:200,colors:[{name:"Prussian Blue",hex:"#1C3A5C"},{name:"Vermilion",hex:"#C03820"},{name:"Pale Gold",hex:"#E8D098"},{name:"Ivory",hex:"#F4EDD4"}]},
+];
+
+// Hero featured palettes
+const HERO_COLORS = ["#F4EDD4","#E8D098","#C03820","#1C3A5C","#8A9E78","#4E1E3E","#DC9C18","#1E6868"];
+document.getElementById('hero-swatches').innerHTML = HERO_COLORS.map(c=>`<div class="hero-swatch" style="background:${c}"></div>`).join('');
+
+// State
+let currentFilter = 'all';
+let currentSearch = '';
+let openPaletteId = null;
+let filteredIds = [];
+
+function getFiltered() {
+  const q = currentSearch.toLowerCase().trim();
+  return PALETTES.filter(p => {
+    const countMatch = currentFilter === 'all' || p.colors.length === parseInt(currentFilter);
+    const searchMatch = !q || p.colors.some(c => c.name.toLowerCase().includes(q) || c.hex.toLowerCase().includes(q));
+    return countMatch && searchMatch;
+  });
+}
+
+function renderGrid() {
+  const filtered = getFiltered();
+  filteredIds = filtered.map(p => p.id);
+  const grid = document.getElementById('palette-grid');
+  document.getElementById('result-count').textContent = `${filtered.length} palette${filtered.length !== 1 ? 's' : ''}`;
+  if (!filtered.length) {
+    grid.innerHTML = '<div class="empty">No palettes match your search.</div>';
+    return;
+  }
+  grid.innerHTML = filtered.map(p => {
+    const swatches = p.colors.map(c => `<div class="swatch" style="background:${c.hex}"></div>`).join('');
+    const names = p.colors.map(c => c.name).join(' · ');
+    const countLabel = p.colors.length === 2 ? 'Duet' : p.colors.length === 3 ? 'Triad' : 'Quartet';
+    return `<div class="palette-card" onclick="openModal(${p.id})">
+      <div class="swatch-row">${swatches}</div>
+      <div class="card-info">
+        <div class="card-num">No. ${String(p.id).padStart(3,'0')}</div>
+        <div class="card-names">${names}</div>
+        <span class="card-badge">${countLabel}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setFilter(btn) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.f;
+  applyFilters();
+}
+
+function applyFilters() {
+  currentSearch = document.getElementById('search').value;
+  renderGrid();
+}
+
+function openModal(id) {
+  const p = PALETTES.find(x => x.id === id);
+  if (!p) return;
+  openPaletteId = id;
+  document.getElementById('modal-swatches').innerHTML = p.colors.map(c=>`<div class="modal-swatch" style="background:${c.hex}"></div>`).join('');
+  document.getElementById('modal-num').textContent = `Combination No. ${String(p.id).padStart(3,'0')} · ${p.colors.length === 2 ? 'Duet' : p.colors.length === 3 ? 'Triad' : 'Quartet'}`;
+  document.getElementById('modal-title').textContent = p.colors.map(c=>c.name).join(' & ');
+  document.getElementById('color-list').innerHTML = p.colors.map(c=>`
+    <div class="color-row">
+      <div class="color-chip" style="background:${c.hex}"></div>
+      <div class="color-meta">
+        <div class="color-name">${c.name}</div>
+        <div class="color-hex">${c.hex}</div>
+      </div>
+      <button class="copy-btn" onclick="copyHex(this,'${c.hex}')">Copy</button>
+    </div>`).join('');
+  document.getElementById('overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('overlay') && !e.target.classList.contains('modal-close')) return;
+  document.getElementById('overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  openPaletteId = null;
+}
+
+function navigatePalette(dir) {
+  if (!openPaletteId) return;
+  const idx = filteredIds.indexOf(openPaletteId);
+  if (idx === -1) return;
+  const next = filteredIds[idx + dir];
+  if (next !== undefined) openModal(next);
+}
+
+function copyHex(btn, hex) {
+  navigator.clipboard.writeText(hex).then(() => {
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+  });
+}
+
+function copyAll() {
+  if (!openPaletteId) return;
+  const p = PALETTES.find(x => x.id === openPaletteId);
+  const text = p.colors.map(c=>`${c.name}: ${c.hex}`).join('\n');
+  navigator.clipboard.writeText(text).then(() => showToast('All hex values copied'));
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function scrollToArchive(e) {
+  e.preventDefault();
+  document.getElementById('filter-bar').scrollIntoView({behavior:'smooth'});
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal({}); closeModal = function(ev){if(ev&&ev.target!==document.getElementById('overlay')&&!ev.target.classList.contains('modal-close'))return;document.getElementById('overlay').classList.remove('open');document.body.style.overflow='';openPaletteId=null;}; }
+  if (document.getElementById('overlay').classList.contains('open')) {
+    if (e.key === 'ArrowRight') navigatePalette(1);
+    if (e.key === 'ArrowLeft') navigatePalette(-1);
+  }
+});
+
+// Init
+renderGrid();
+</script>
+</body>
+</html>
