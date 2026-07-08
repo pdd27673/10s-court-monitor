@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runScheduledScrape } from "@/lib/scrape-scheduler";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
 import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
+import { reportScrapeHealth } from "@/lib/health";
 import { db } from "@/lib/db";
 import { slots, notificationLog, scrapeTargets } from "@/lib/schema";
 import { lt, sql } from "drizzle-orm";
@@ -85,6 +86,10 @@ async function runScrapeJob(force = false) {
 
     // Only send alerts/summaries if we actually scraped something
     if (targetsScraped > 0) {
+      // Detect silent parser breakage (scraped targets but ~0 slots) and
+      // ping the Healthchecks.io dead-man's-switch.
+      await reportScrapeHealth({ slots: allSlots, targetsScraped });
+
       // Check for high failure rate and alert admin
       await sendScrapeFailureAlert(stats);
 
