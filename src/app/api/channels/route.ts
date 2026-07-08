@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
+import { Expo } from "expo-server-sdk";
 import { db } from "@/lib/db";
 import { notificationChannels } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { parseSessionUserId } from "@/lib/utils/fetch-helpers";
+
+// Channel types a user may create for themselves.
+const ALLOWED_CHANNEL_TYPES = ["telegram", "email", "expo-push"];
 
 // GET /api/channels - List user's notification channels
 export async function GET() {
@@ -71,10 +75,18 @@ export async function POST(request: Request) {
     );
   }
 
-  // Only allow telegram and email (whatsapp not yet implemented)
-  if (!["telegram", "email"].includes(type)) {
+  // Only allow known channel types (whatsapp not yet implemented)
+  if (!ALLOWED_CHANNEL_TYPES.includes(type)) {
     return NextResponse.json(
-      { error: "type must be telegram or email. WhatsApp support is not yet available." },
+      { error: "type must be telegram, email, or expo-push." },
+      { status: 400 }
+    );
+  }
+
+  // For push channels the destination must be a valid Expo push token.
+  if (type === "expo-push" && !Expo.isExpoPushToken(trimmedDestination)) {
+    return NextResponse.json(
+      { error: "destination must be a valid Expo push token (ExponentPushToken[...])." },
       { status: 400 }
     );
   }
