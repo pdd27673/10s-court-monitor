@@ -3,21 +3,19 @@ import { Expo } from "expo-server-sdk";
 import { db } from "@/lib/db";
 import { notificationChannels } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { parseSessionUserId } from "@/lib/utils/fetch-helpers";
+import { getAuthedUserId } from "@/lib/mobile-auth";
 
 // Channel types a user may create for themselves.
 const ALLOWED_CHANNEL_TYPES = ["telegram", "email", "expo-push"];
 
 // GET /api/channels - List user's notification channels
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const userId = await getAuthedUserId(request);
+    if (userId === null) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = parseSessionUserId(session);
     const channels = await db.query.notificationChannels.findMany({
       where: eq(notificationChannels.userId, userId),
     });
@@ -42,12 +40,11 @@ export async function GET() {
 // POST /api/channels - Create a new notification channel
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
+    const userId = await getAuthedUserId(request);
+    if (userId === null) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const userId = parseSessionUserId(session);
     const body = await request.json();
     const { type, destination } = body;
 

@@ -2,16 +2,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { watches, venues } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getAuthedUserId } from "@/lib/mobile-auth";
 
 // GET /api/watches - List user's watches
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
+export async function GET(request: Request) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userId = parseInt(session.user.id);
   const allWatches = await db.query.watches.findMany({
     where: eq(watches.userId, userId),
   });
@@ -60,12 +59,11 @@ export async function GET() {
 
 // POST /api/watches - Create a new watch
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const userId = parseInt(session.user.id);
   const body = await request.json();
   const { venueSlug, dayTimes } = body;
 

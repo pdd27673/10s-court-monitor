@@ -102,11 +102,27 @@ const customAdapter: Adapter = {
     };
   },
 
-  async createUser(_data) {
-    // Don't auto-create users - they should only be created through registration approval
-    // This prevents "zombie" accounts for unapproved users
-    // If we reach this point, the user was already checked in getUserByEmail and exists
-    throw new Error("User creation should only happen through registration approval");
+  async createUser(data) {
+    // Open signup: provision a new user as allowed. `isAllowed` remains a ban
+    // switch (an admin can set it to 0 to block an existing user; the signIn
+    // callback below still enforces it).
+    const [created] = await db
+      .insert(users)
+      .values({
+        email: data.email.toLowerCase(),
+        name: data.name ?? null,
+        image: data.image ?? null,
+        emailVerified: data.emailVerified ? data.emailVerified.toISOString() : null,
+        isAllowed: 1,
+      })
+      .returning();
+    return {
+      id: String(created.id),
+      email: created.email,
+      emailVerified: created.emailVerified ? new Date(created.emailVerified) : null,
+      name: created.name,
+      image: created.image,
+    };
   },
 
   async getUser(id) {

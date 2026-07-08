@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getAuthedUserId } from "@/lib/mobile-auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const session = await auth();
+    const userId = await getAuthedUserId(request);
 
-    if (!session?.user?.email) {
+    if (userId === null) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -16,7 +16,7 @@ export async function GET() {
     const user = await db
       .select()
       .from(users)
-      .where(eq(users.email, session.user.email.toLowerCase()))
+      .where(eq(users.id, userId))
       .limit(1);
 
     if (!user[0]) {
