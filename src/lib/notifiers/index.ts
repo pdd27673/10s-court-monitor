@@ -3,6 +3,7 @@ import { notificationChannels, notificationLog, watches } from "../schema";
 import { SlotChange } from "../differ";
 import { sendTelegramMessage, formatSlotChangesForTelegram } from "./telegram";
 import { sendEmail, formatSlotChangesForEmail, sendScrapeFailureAlert, sendScrapeSummary } from "./email";
+import { sendExpoPush, formatSlotChangesForExpoPush } from "./expo-push";
 import { eq, and } from "drizzle-orm";
 
 export { sendScrapeFailureAlert, sendScrapeSummary };
@@ -137,6 +138,29 @@ export async function notifyUsers(changes: SlotChange[]) {
           const { subject, html } = formatSlotChangesForEmail(notifiedSlots);
           await sendEmail(channel.destination, subject, html);
           notificationSent = true;
+        } else if (channel.type === "expo-push") {
+          const { title, body } = formatSlotChangesForExpoPush(notifiedSlots);
+          const result = await sendExpoPush(channel.destination, {
+            title,
+            body,
+            data: { type: "slot-available" },
+          });
+          if (result.ok) {
+            notificationSent = true;
+          } else if (result.deviceNotRegistered) {
+            // Device uninstalled the app / revoked push — stop targeting it.
+            await db
+              .update(notificationChannels)
+              .set({ active: 0 })
+              .where(eq(notificationChannels.id, channel.id));
+            console.log(
+              `Deactivated dead expo-push channel ${channel.id} (DeviceNotRegistered)`
+            );
+            continue;
+          } else {
+            // Transient/other error — throw to hit the catch below (not logged as sent).
+            throw new Error(`Expo push failed: ${result.error}`);
+          }
         } else {
           // Unsupported channel type (e.g., whatsapp)
           console.error(
