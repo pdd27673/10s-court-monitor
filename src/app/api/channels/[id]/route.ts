@@ -4,7 +4,7 @@ import { Expo } from "expo-server-sdk";
 import { db } from "@/lib/db";
 import { notificationChannels } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getAuthedUserId } from "@/lib/mobile-auth";
 
 // Channel types a user may set on their own channels.
 const ALLOWED_CHANNEL_TYPES = ["telegram", "email", "expo-push"];
@@ -14,14 +14,13 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const channelId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(channelId)) {
     return NextResponse.json({ error: "Invalid channel ID" }, { status: 400 });
@@ -54,14 +53,13 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const channelId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(channelId)) {
     return NextResponse.json({ error: "Invalid channel ID" }, { status: 400 });
@@ -159,14 +157,13 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const channelId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(channelId)) {
     return NextResponse.json({ error: "Invalid channel ID" }, { status: 400 });
@@ -210,14 +207,13 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const channelId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(channelId)) {
     return NextResponse.json({ error: "Invalid channel ID" }, { status: 400 });

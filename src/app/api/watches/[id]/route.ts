@@ -3,21 +3,20 @@ import type { DayTimes, WatchResponse } from "@pdd27673/10s-contract";
 import { db } from "@/lib/db";
 import { watches, venues } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { getAuthedUserId } from "@/lib/mobile-auth";
 
 // GET /api/watches/[id] - Get a specific watch
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const watchId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(watchId)) {
     return NextResponse.json({ error: "Invalid watch ID" }, { status: 400 });
@@ -74,14 +73,13 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const watchId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(watchId)) {
     return NextResponse.json({ error: "Invalid watch ID" }, { status: 400 });
@@ -171,14 +169,13 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const watchId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(watchId)) {
     return NextResponse.json({ error: "Invalid watch ID" }, { status: 400 });
@@ -214,14 +211,13 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getAuthedUserId(request);
+  if (userId === null) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { id } = await params;
   const watchId = parseInt(id);
-  const userId = parseInt(session.user.id);
 
   if (isNaN(watchId)) {
     return NextResponse.json({ error: "Invalid watch ID" }, { status: 400 });
