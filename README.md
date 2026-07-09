@@ -411,8 +411,9 @@ Schedule: */10 7-22 * * *
    - `RESEND_API_KEY=your-resend-api-key`
    - `EMAIL_FROM=Time for Tennis <hello@timefor10s.com>` (must be verified domain)
    - `AUTH_SECRET=your-auth-secret`
-   - `AUTH_URL=https://your-app.railway.app`
-   - `NEXT_PUBLIC_APP_URL=https://your-app.railway.app`
+   - `AUTH_URL=https://timefor10s.com`
+   - `NEXT_PUBLIC_APP_URL=https://timefor10s.com`
+   - `NEXTAUTH_URL=https://timefor10s.com`
 
 5. Deploy:
    ```bash
