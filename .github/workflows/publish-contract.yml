@@ -28,7 +28,9 @@ jobs:
         working-directory: packages/contract
         run: |
           VERSION="${GITHUB_REF_NAME#contract-v}"
-          npm version "$VERSION" --no-git-tag-version
+          # --allow-same-version: the committed package.json version usually already
+          # matches the tag (idempotent), so npm mustn't error with "Version not changed".
+          npm version "$VERSION" --allow-same-version --no-git-tag-version
 
       - name: Publish
         working-directory: packages/contract
