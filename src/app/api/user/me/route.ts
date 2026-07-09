@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { MeResponse } from "@pdd27673/10s-contract";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
@@ -23,15 +24,16 @@ export async function GET() {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    return NextResponse.json({
+    const response: MeResponse = {
       user: {
         id: user[0].id,
         email: user[0].email,
         name: user[0].name,
-        isAdmin: user[0].isAdmin,
-        isAllowed: user[0].isAllowed,
+        isAdmin: user[0].isAdmin ?? 0,
+        isAllowed: user[0].isAllowed ?? 0,
       },
-    });
+    };
+    return NextResponse.json(response);
   } catch (error) {
     console.error("Error fetching user:", error);
     return NextResponse.json({ error: "Failed to fetch user" }, { status: 500 });

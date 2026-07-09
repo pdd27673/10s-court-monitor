@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ChannelResponse } from "@pdd27673/10s-contract";
 import { db } from "@/lib/db";
 import { notificationChannels } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
@@ -33,14 +34,15 @@ export async function GET(
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
+  const response: ChannelResponse = {
     channel: {
       id: channel.id,
       type: channel.type,
       destination: channel.destination,
       active: Boolean(channel.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }
 
 // PUT /api/channels/[id] - Update a channel
@@ -127,14 +129,15 @@ export async function PUT(
 
   const updatedChannel = updatedChannels[0];
 
-  return NextResponse.json({
+  const response: ChannelResponse = {
     channel: {
       id: updatedChannel.id,
       type: updatedChannel.type,
       destination: updatedChannel.destination,
       active: Boolean(updatedChannel.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }
 
 // DELETE /api/channels/[id] - Delete a channel
@@ -249,12 +252,13 @@ export async function PATCH(
 
   const updatedChannel = updatedChannels[0];
 
-  return NextResponse.json({
+  const response: ChannelResponse = {
     channel: {
       id: updatedChannel.id,
       type: updatedChannel.type,
       destination: updatedChannel.destination,
       active: Boolean(updatedChannel.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }

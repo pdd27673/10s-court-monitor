@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { AvailabilityResponse } from "@pdd27673/10s-contract";
 import { db } from "@/lib/db";
 import { slots, venues } from "@/lib/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
   // Create a map of venue ID to venue info for quick lookup
   const venueMap = new Map(venueRecords.map((v) => [v.id, v]));
 
-  return NextResponse.json({
+  const response: AvailabilityResponse = {
     venues: venueRecords.map((v) => ({
       slug: v.slug,
       name: v.name,
@@ -79,10 +80,11 @@ export async function GET(request: Request) {
         venueName: venue?.name || "",
         time: s.time,
         court: s.court,
-        status: s.status,
+        status: s.status as AvailabilityResponse["slots"][number]["status"],
         price: s.price,
       };
     }),
     lastUpdated: mostRecentSlot?.updatedAt || null,
-  });
+  };
+  return NextResponse.json(response);
 }

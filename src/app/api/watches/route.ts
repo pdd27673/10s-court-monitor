@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { DayTimes, Watch, WatchResponse, WatchesResponse } from "@pdd27673/10s-contract";
 import { db } from "@/lib/db";
 import { watches, venues } from "@/lib/schema";
 import { eq } from "drizzle-orm";
@@ -27,9 +28,9 @@ export async function GET() {
       }
 
       // Support both new dayTimes and legacy weekday/weekend fields
-      let dayTimes = null;
+      let dayTimes: DayTimes | null = null;
       if (watch.dayTimes) {
-        dayTimes = JSON.parse(watch.dayTimes);
+        dayTimes = JSON.parse(watch.dayTimes) as DayTimes;
       } else if (watch.weekdayTimes || watch.weekendTimes) {
         // Convert legacy format to new format
         const weekday = watch.weekdayTimes ? JSON.parse(watch.weekdayTimes) : [];
@@ -45,17 +46,19 @@ export async function GET() {
         };
       }
 
-      return {
+      const item: Watch = {
         id: watch.id,
         userId: watch.userId,
         venue: venue ? { slug: venue.slug, name: venue.name } : null,
         dayTimes,
         active: Boolean(watch.active),
       };
+      return item;
     })
   );
 
-  return NextResponse.json({ watches: enriched });
+  const response: WatchesResponse = { watches: enriched };
+  return NextResponse.json(response);
 }
 
 // POST /api/watches - Create a new watch
@@ -96,13 +99,14 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.json({
+  const response: WatchResponse = {
     watch: {
       id: watch.id,
       userId: watch.userId,
       venue: venue ? { slug: venue.slug, name: venue.name } : null,
-      dayTimes: watch.dayTimes ? JSON.parse(watch.dayTimes) : null,
+      dayTimes: watch.dayTimes ? (JSON.parse(watch.dayTimes) as DayTimes) : null,
       active: Boolean(watch.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }

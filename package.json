@@ -19,6 +19,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@pdd27673/10s-contract": "file:packages/contract",
     "@auth/drizzle-adapter": "^1.11.1",
     "@tailwindcss/postcss": "^4",
     "better-sqlite3": "^12.6.2",

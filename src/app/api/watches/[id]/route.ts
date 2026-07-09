@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { DayTimes, WatchResponse } from "@pdd27673/10s-contract";
 import { db } from "@/lib/db";
 import { watches, venues } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
@@ -38,9 +39,9 @@ export async function GET(
   }
 
   // Support both new dayTimes and legacy weekday/weekend fields
-  let dayTimes = null;
+  let dayTimes: DayTimes | null = null;
   if (watch.dayTimes) {
-    dayTimes = JSON.parse(watch.dayTimes);
+    dayTimes = JSON.parse(watch.dayTimes) as DayTimes;
   } else if (watch.weekdayTimes || watch.weekendTimes) {
     // Convert legacy format to new format
     const weekday = watch.weekdayTimes ? JSON.parse(watch.weekdayTimes) : [];
@@ -56,7 +57,7 @@ export async function GET(
     };
   }
 
-  return NextResponse.json({
+  const response: WatchResponse = {
     watch: {
       id: watch.id,
       userId: watch.userId,
@@ -64,7 +65,8 @@ export async function GET(
       dayTimes,
       active: Boolean(watch.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }
 
 // PUT /api/watches/[id] - Update a watch
@@ -134,9 +136,9 @@ export async function PUT(
   }
 
   // Support both new dayTimes and legacy weekday/weekend fields
-  let responseDayTimes = null;
+  let responseDayTimes: DayTimes | null = null;
   if (updatedWatch.dayTimes) {
-    responseDayTimes = JSON.parse(updatedWatch.dayTimes);
+    responseDayTimes = JSON.parse(updatedWatch.dayTimes) as DayTimes;
   } else if (updatedWatch.weekdayTimes || updatedWatch.weekendTimes) {
     // Convert legacy format to new format
     const weekday = updatedWatch.weekdayTimes ? JSON.parse(updatedWatch.weekdayTimes) : [];
@@ -152,7 +154,7 @@ export async function PUT(
     };
   }
 
-  return NextResponse.json({
+  const response: WatchResponse = {
     watch: {
       id: updatedWatch.id,
       userId: updatedWatch.userId,
@@ -160,7 +162,8 @@ export async function PUT(
       dayTimes: responseDayTimes,
       active: Boolean(updatedWatch.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }
 
 // DELETE /api/watches/[id] - Delete a watch
@@ -267,9 +270,9 @@ export async function PATCH(
   }
 
   // Support both new dayTimes and legacy weekday/weekend fields
-  let dayTimes = null;
+  let dayTimes: DayTimes | null = null;
   if (updatedWatch.dayTimes) {
-    dayTimes = JSON.parse(updatedWatch.dayTimes);
+    dayTimes = JSON.parse(updatedWatch.dayTimes) as DayTimes;
   } else if (updatedWatch.weekdayTimes || updatedWatch.weekendTimes) {
     // Convert legacy format to new format
     const weekday = updatedWatch.weekdayTimes ? JSON.parse(updatedWatch.weekdayTimes) : [];
@@ -285,7 +288,7 @@ export async function PATCH(
     };
   }
 
-  return NextResponse.json({
+  const response: WatchResponse = {
     watch: {
       id: updatedWatch.id,
       userId: updatedWatch.userId,
@@ -293,5 +296,6 @@ export async function PATCH(
       dayTimes,
       active: Boolean(updatedWatch.active),
     },
-  });
+  };
+  return NextResponse.json(response);
 }

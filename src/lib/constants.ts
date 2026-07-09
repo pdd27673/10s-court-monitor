@@ -1,13 +1,6 @@
-export type VenueType = "courtside" | "clubspark";
+import type { Venue, VenueType } from "@pdd27673/10s-contract";
 
-export interface Venue {
-  slug: string;
-  name: string;
-  type: VenueType;
-  // ClubSpark-specific config
-  clubsparkId?: string;
-  clubsparkHost?: string;
-}
+export type { Venue, VenueType };
 
 export const VENUES: Venue[] = [
   // Courtside platform (Tower Hamlets)
@@ -31,6 +24,4 @@ export const VENUES: Venue[] = [
     clubsparkId: "WestHamPark",
     clubsparkHost: "clubspark.lta.org.uk",
   },
-] as const;
-
-export type VenueSlug = (typeof VENUES)[number]["slug"];
+];

@@ -567,6 +567,9 @@ SQLite uses WAL mode for better concurrency, but heavy writes can still cause lo
 ## Project Structure
 
 ```
+packages/
+└── contract/                 # @pdd27673/10s-contract (GitHub Packages)
+    └── src/index.ts          # Shared REST response/request types
 src/
 ├── app/
 │   ├── page.tsx              # Landing page
@@ -594,6 +597,20 @@ src/
 │   └── setup-telegram-webhook.ts  # Telegram webhook setup
 └── data/
     └── tennis.db             # SQLite database
+```
+
+### Shared contract (`packages/contract`)
+
+API response shapes live in `@pdd27673/10s-contract`. Route handlers import from
+it so the backend is type-checked against the same contract it publishes.
+`10s-mobile` consumes the package (local `file:` link, or a published version
+from GitHub Packages).
+
+Publish a new version:
+
+```bash
+git tag contract-v0.1.1
+git push origin contract-v0.1.1
 ```
 
 ---
