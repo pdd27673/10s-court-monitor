@@ -4,9 +4,11 @@ import type { ScrapeStats } from "../scraper";
 // Mock resend before any module imports
 const mockEmailSend = vi.fn();
 vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({
-    emails: { send: mockEmailSend },
-  })),
+  // Regular function (not an arrow) so it can be used with `new` under vitest 4,
+  // which constructs mock implementations via Reflect.construct.
+  Resend: vi.fn().mockImplementation(function () {
+    return { emails: { send: mockEmailSend } };
+  }),
 }));
 
 function makeStats(venuesSuccess: number, venuesFailed: number): ScrapeStats {
