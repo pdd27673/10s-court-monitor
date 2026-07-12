@@ -26,8 +26,8 @@ export async function POST() {
       try {
         await ensureVenuesExist();
 
-        // Get next N days (configurable via SCRAPE_DAYS env var, default 8)
-        const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "8", 10);
+        // Get next N days (configurable via SCRAPE_DAYS env var, default 9)
+        const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "9", 10);
         const dates = getNextNDays(scrapeDays);
 
         // Run full scrape with timing and stats

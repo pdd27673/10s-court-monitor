@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import UserAgent from "user-agents";
+import { courtLabelImpliesCoaching } from "../coaching-label";
 import { proxyManager, proxyFetch } from "../proxy-manager";
 import { ScrapedSlot } from "./types";
 
@@ -106,7 +107,7 @@ export async function scrapeCourtside(
         const court = buttonText || "Unknown";
 
         // Skip non-tennis courts
-        const NON_TENNIS_KEYWORDS = ["cricket", "netball", "football", "basketball", "bowls", "bowling"];
+        const NON_TENNIS_KEYWORDS = ["cricket", "netball", "football", "basketball", "bowls", "bowling", "padel", "paddle"];
         if (NON_TENNIS_KEYWORDS.some((kw) => court.toLowerCase().includes(kw))) {
           return;
         }
@@ -122,7 +123,8 @@ export async function scrapeCourtside(
         } else if (button.hasClass("coaching") || button.hasClass("class")) {
           status = "coaching";
         } else {
-          status = "closed";
+          const combinedText = `${court} ${button.text()}`;
+          status = courtLabelImpliesCoaching(combinedText) ? "coaching" : "closed";
         }
 
         slots.push({
