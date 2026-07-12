@@ -1,33 +1,12 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "6",
-      "when": 1768998695361,
-      "tag": "0000_absent_wrecker",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1769261949219,
-      "tag": "0001_productive_chronomancer",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1771009740172,
-      "tag": "0002_curved_karnak",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1771267212805,
-      "tag": "0003_youthful_magdalene",
+      "version": "7",
+      "when": 1783868457981,
+      "tag": "0000_strange_lila_cheney",
       "breakpoints": true
     }
   ]

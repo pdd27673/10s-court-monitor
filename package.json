@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && npm run db:migrate",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
@@ -14,6 +14,7 @@
     "db:sync": "tsx scripts/db-migrate.ts --push",
     "db:normalize-emails": "tsx scripts/normalize-emails.ts",
     "db:migrate-watches": "tsx scripts/migrate-watches-to-days.ts",
+    "db:migrate-data": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "maintain": "tsx scripts/maintain.ts",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -33,6 +34,7 @@
     "next": "^16.1.6",
     "next-auth": "^5.0.0-beta.30",
     "node-fetch": "^3.3.2",
+    "pg": "^8.13.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "resend": "^6.8.0",
@@ -46,6 +48,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
+    "@types/pg": "^8.11.10",
     "@types/react": "19.2.14",
     "@types/react-dom": "^19",
     "@types/user-agents": "^1.0.4",
