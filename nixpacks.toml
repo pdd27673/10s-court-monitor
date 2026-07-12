@@ -1,18 +1,17 @@
 # Nixpacks configuration for Railway
-# Required for better-sqlite3 native module compilation
+# python3/gcc/gnumake remain for better-sqlite3 (used only by the one-off
+# sqlite->postgres data-migration + legacy watch-migration scripts).
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake", "sqlite"]
+nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake"]
 
 [phases.install]
 cmds = ["npm ci --include=dev"]
 
 [phases.build]
-cmds = [
-  "npm run build",
-  "mkdir -p data",
-  "npm run db:migrate"
-]
+cmds = ["npm run build"]
 
+# db:migrate runs at deploy time (railway.json startCommand), where DATABASE_URL
+# is available — not at build time.
 [start]
-cmd = "npm start"
+cmd = "npm run db:migrate && npm start"

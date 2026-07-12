@@ -19,7 +19,7 @@ export async function POST() {
     }
 
     // Run VACUUM to optimize the database
-    await db.run(sql`VACUUM`);
+    await db.execute(sql`VACUUM`);
 
     return NextResponse.json({ success: true, message: "Database vacuumed successfully" });
   } catch (error) {

@@ -6,12 +6,12 @@ import { proxyManager } from "@/lib/proxy-manager";
 export async function GET() {
   try {
     // Test database connection
-    const result = db.get<{ ok: number }>(sql`SELECT 1 as ok`);
+    const result = await db.execute<{ ok: number }>(sql`SELECT 1 as ok`);
     const proxyStats = proxyManager.getStats();
 
     return NextResponse.json({
       status: "healthy",
-      database: result?.ok === 1 ? "connected" : "error",
+      database: result.rows[0]?.ok === 1 ? "connected" : "error",
       proxy: {
         configured: proxyStats.configured,
         totalRequests: proxyStats.totalRequests,

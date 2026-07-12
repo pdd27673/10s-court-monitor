@@ -31,7 +31,7 @@ async function runCleanup() {
     console.log(`Deleted ${deletedLogs.length} old notification logs`);
 
     // Vacuum database to reclaim space
-    await db.run(sql`VACUUM`);
+    await db.execute(sql`VACUUM`);
     console.log("Database vacuumed");
   } catch (error) {
     console.error("Cleanup failed:", error);

@@ -151,7 +151,7 @@ async function showStatus() {
 
   // Database check
   try {
-    db.get<{ ok: number }>(sql`SELECT 1 as ok`);
+    await db.execute(sql`SELECT 1 as ok`);
     log(`✓ Database: Connected`, "green");
   } catch (e) {
     log(`✗ Database: Error - ${e}`, "red");
@@ -744,7 +744,7 @@ async function cleanup() {
   log(`✓ Deleted ${oldLogs.length} old notification logs`, "green");
 
   // Vacuum database
-  db.run(sql`VACUUM`);
+  await db.execute(sql`VACUUM`);
   log(`✓ Database vacuumed`, "green");
 }
 
@@ -862,8 +862,8 @@ async function dbStats() {
 
   for (const table of tables) {
     try {
-      const result = db.get<{ count: number }>(sql.raw(`SELECT COUNT(*) as count FROM ${table}`));
-      console.log(`  ${table.padEnd(25)} ${result?.count ?? 0} rows`);
+      const result = await db.execute<{ count: number }>(sql.raw(`SELECT COUNT(*) as count FROM ${table}`));
+      console.log(`  ${table.padEnd(25)} ${result.rows[0]?.count ?? 0} rows`);
     } catch {
       console.log(`  ${table.padEnd(25)} (table not found)`);
     }

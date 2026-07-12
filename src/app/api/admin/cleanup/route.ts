@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const deletedLogs = await db.delete(notificationLog).where(lt(notificationLog.sentAt, cutoff)).returning();
 
     // Vacuum database
-    db.run(sql`VACUUM`);
+    await db.execute(sql`VACUUM`);
 
     return NextResponse.json({
       success: true,
