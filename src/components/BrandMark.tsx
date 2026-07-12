@@ -10,6 +10,8 @@ export function BrandMark({
   className?: string;
 }) {
   return (
+    // Static SVG mark — next/image doesn't optimize SVGs, so a plain <img> is intentional.
+    // eslint-disable-next-line @next/next/no-img-element
     <img
       src="/icon.svg"
       alt=""
