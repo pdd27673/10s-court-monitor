@@ -1,0 +1,90 @@
+import { describe, it, expect } from "vitest";
+import { parseFacilityUse, parseSlot, isGreaterLondon, slugify } from "./parse";
+
+// Trimmed real payloads from the Premier Tennis OpenActive feed.
+const FACILITY_TH = {
+  "@id": "https://api.premiertennis.co.uk/openactive/feed/facility-uses/251",
+  identifier: "251",
+  name: "Tennis courts at Bethnal Green Gardens",
+  individualFacilityUse: [
+    { "@id": ".../251/individual-facility-uses/300", name: "Court 1" },
+    { "@id": ".../251/individual-facility-uses/301", name: "Court 2" },
+  ],
+  location: {
+    name: "Bethnal Green Gardens",
+    address: { streetAddress: "Cambridge Heath Rd", addressLocality: "London", addressRegion: "Greater London", postalCode: "E2 0EU" },
+    amenityFeature: [{ name: "Toilets", value: true }, { name: "Floodlit courts", value: false }],
+    geo: { latitude: 51.52503, longitude: -0.05335 },
+  },
+};
+
+const FACILITY_NORTHAMPTON = {
+  "@id": "https://api.premiertennis.co.uk/openactive/feed/facility-uses/29",
+  identifier: "29",
+  name: "Tennis courts at Abington Park",
+  individualFacilityUse: [{ "@id": ".../29/individual-facility-uses/38", name: "Court 1" }],
+  location: { name: "Abington Park", geo: { latitude: 52.245093, longitude: -0.867082 } },
+};
+
+const SLOT = {
+  "@id": ".../facility-uses/20/individual-facility-uses/216/slots/2194460",
+  facilityUse: "https://api.premiertennis.co.uk/openactive/feed/facility-uses/20/individual-facility-uses/216",
+  startDate: "2026-07-12T17:00:00+01:00",
+  endDate: "2026-07-12T18:00:00+01:00",
+  remainingUses: 1,
+  maximumUses: 1,
+  offers: [
+    { identifier: "base", name: "Standard", price: 8.5, priceCurrency: "GBP" },
+    { identifier: "adult-consession", price: 5.25, priceCurrency: "GBP" },
+  ],
+};
+
+describe("isGreaterLondon", () => {
+  it("accepts London, rejects Northampton and missing geo", () => {
+    expect(isGreaterLondon(51.525, -0.053)).toBe(true);
+    expect(isGreaterLondon(52.245, -0.867)).toBe(false);
+    expect(isGreaterLondon(null, null)).toBe(false);
+  });
+});
+
+describe("slugify", () => {
+  it("kebab-cases and handles ampersands", () => {
+    expect(slugify("St John's Park")).toBe("st-john-s-park");
+    expect(slugify("Rec & Gardens")).toBe("rec-and-gardens");
+  });
+});
+
+describe("parseFacilityUse", () => {
+  it("maps a known TH facility to its existing slug with courts + geo + amenities", () => {
+    const v = parseFacilityUse(FACILITY_TH)!;
+    expect(v.slug).toBe("bethnal-green-gardens"); // mapped, not slugified
+    expect(v.name).toBe("Bethnal Green Gardens");
+    expect(v.identifier).toBe("251");
+    expect(v.lat).toBeCloseTo(51.52503);
+    expect(v.postcode).toBe("E2 0EU");
+    expect(v.address).toContain("Cambridge Heath Rd");
+    expect(v.courts).toHaveLength(2);
+    expect(v.amenities).toEqual({ Toilets: true, "Floodlit courts": false });
+  });
+
+  it("slugifies an unknown facility from its place name", () => {
+    const v = parseFacilityUse(FACILITY_NORTHAMPTON)!;
+    expect(v.slug).toBe("abington-park");
+    expect(v.courts).toHaveLength(1);
+  });
+});
+
+describe("parseSlot", () => {
+  it("extracts court link, times, availability and base price", () => {
+    const s = parseSlot(SLOT)!;
+    expect(s.courtExternalId).toContain("individual-facility-uses/216");
+    expect(s.startsAt).toBe("2026-07-12T17:00:00+01:00");
+    expect(s.remainingUses).toBe(1);
+    expect(s.price).toBe(8.5); // base offer, not the concession
+    expect(s.currency).toBe("GBP");
+  });
+
+  it("returns null when required fields are missing", () => {
+    expect(parseSlot({ startDate: "2026-01-01" })).toBeNull();
+  });
+});
