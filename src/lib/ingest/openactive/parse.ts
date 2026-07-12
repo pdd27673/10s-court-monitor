@@ -32,6 +32,45 @@ export function slugify(s: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+// ---- Feed-reference + legacy-label helpers (pure) ----
+
+/** Extract the parent facility id from a facility-use / individual-facility-use
+ * / slot @id, e.g. ".../facility-uses/251/individual-facility-uses/300" -> "251". */
+export function facilityIdFromRef(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const m = /\/facility-uses\/(\d+)/.exec(ref);
+  return m ? m[1] : null;
+}
+
+/** Court number from a court name — the last number in the string, tolerating a
+ * trailing marker. Feed names are "Court 3"; the HTML scraper appends " -" to
+ * coaching rows ("Tennis court 3 -"), so match the final digit group followed by
+ * any non-digits. This keeps the feed and scraper court labels on one join key. */
+export function courtNumberFromName(name: string | null | undefined): number | null {
+  if (!name) return null;
+  const m = /(\d+)\D*$/.exec(name.trim());
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** Local date ("2026-07-12") from an ISO string, using the string's own wall
+ * clock — no timezone conversion, matching how the scraper reads venue-local dates. */
+export function localDate(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+/** Scraper-style hour label from an ISO string's wall-clock hour:
+ * "2026-07-12T17:00:00+01:00" -> "5pm". Matches the labels the HTML scraper
+ * stores ("7am", "12pm", "8pm") so feed + scraper rows share a key. */
+export function hourLabel(iso: string): string | null {
+  const m = /T(\d{2}):/.exec(iso);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  if (h === 0) return "12am";
+  if (h < 12) return `${h}am`;
+  if (h === 12) return "12pm";
+  return `${h - 12}pm`;
+}
+
 // ---- FacilityUse ----
 
 export interface ParsedCourt {

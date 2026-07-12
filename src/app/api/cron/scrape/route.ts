@@ -3,10 +3,48 @@ import { runScheduledScrape } from "@/lib/scrape-scheduler";
 import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
 import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
 import { db } from "@/lib/db";
-import { slots, notificationLog, scrapeTargets } from "@/lib/schema";
-import { lt, sql } from "drizzle-orm";
+import { slots, notificationLog, scrapeTargets, feedState } from "@/lib/schema";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { proxyManager, formatBytes } from "@/lib/proxy-manager";
 import type { ScrapeStats } from "@/lib/scraper";
+import { ingestFacilities } from "@/lib/ingest/openactive/ingest";
+
+// How often to refresh venue metadata + courts from the OpenActive facility feed.
+// Facilities change rarely, so this runs far less often than the slot scrape.
+const FACILITY_REFRESH_HOURS = parseInt(process.env.FACILITY_REFRESH_HOURS || "6", 10);
+
+/**
+ * Refresh venue geo/address/amenities + the `courts` table from the OpenActive
+ * facility feed, throttled to once per FACILITY_REFRESH_HOURS. Failure-isolated:
+ * a feed hiccup logs and returns — it never breaks the scrape cycle. Does NOT
+ * touch the `slots` table (the scraper still owns availability until Phase 3).
+ */
+async function maybeIngestFacilities() {
+  try {
+    const [state] = await db
+      .select({ lastPolledAt: feedState.lastPolledAt })
+      .from(feedState)
+      .where(and(eq(feedState.source, "openactive"), eq(feedState.feed, "facility-uses")))
+      .limit(1);
+
+    if (state?.lastPolledAt) {
+      const ageMs = Date.now() - new Date(state.lastPolledAt).getTime();
+      if (ageMs < FACILITY_REFRESH_HOURS * 3600_000) {
+        console.log(`Facility refresh skipped (last run ${(ageMs / 3600_000).toFixed(1)}h ago)`);
+        return;
+      }
+    }
+
+    const summary = await ingestFacilities();
+    console.log(
+      `Facility ingest: ${summary.londonVenues} London venues (` +
+        `${summary.venuesInserted} new, ${summary.venuesUpdated} updated), ` +
+        `${summary.courtsUpserted} courts, ${summary.pages} pages`
+    );
+  } catch (error) {
+    console.error("Facility ingest failed (non-fatal):", error);
+  }
+}
 
 // Protect the cron endpoint with a secret (skip in development)
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -44,6 +82,10 @@ async function runScrapeJob(force = false) {
 
     // Ensure all venues exist in DB
     await ensureVenuesExist();
+
+    // Refresh venue metadata + courts from the OpenActive feed (throttled,
+    // failure-isolated, slots untouched).
+    await maybeIngestFacilities();
 
     // If forced, reset all nextScrapeAt timestamps so every target is due now
     if (force) {

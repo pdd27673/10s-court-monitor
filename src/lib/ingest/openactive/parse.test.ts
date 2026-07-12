@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseFacilityUse, parseSlot, isGreaterLondon, slugify } from "./parse";
+import {
+  parseFacilityUse,
+  parseSlot,
+  isGreaterLondon,
+  slugify,
+  facilityIdFromRef,
+  courtNumberFromName,
+  localDate,
+  hourLabel,
+} from "./parse";
 
 // Trimmed real payloads from the Premier Tennis OpenActive feed.
 const FACILITY_TH = {
@@ -71,6 +80,32 @@ describe("parseFacilityUse", () => {
     const v = parseFacilityUse(FACILITY_NORTHAMPTON)!;
     expect(v.slug).toBe("abington-park");
     expect(v.courts).toHaveLength(1);
+  });
+});
+
+describe("feed-reference + label helpers", () => {
+  it("facilityIdFromRef extracts the parent facility id", () => {
+    expect(facilityIdFromRef("https://x/facility-uses/251/individual-facility-uses/300")).toBe("251");
+    expect(facilityIdFromRef(".../facility-uses/20/individual-facility-uses/216/slots/9")).toBe("20");
+    expect(facilityIdFromRef(null)).toBeNull();
+    expect(facilityIdFromRef("no-match")).toBeNull();
+  });
+
+  it("courtNumberFromName reads the trailing number of either naming style", () => {
+    expect(courtNumberFromName("Court 3")).toBe(3);
+    expect(courtNumberFromName("Tennis court 12")).toBe(12);
+    expect(courtNumberFromName("Tennis court 1 -")).toBe(1); // scraper coaching marker
+    expect(courtNumberFromName("Unknown")).toBeNull();
+    expect(courtNumberFromName(null)).toBeNull();
+  });
+
+  it("localDate + hourLabel read the wall clock, not UTC", () => {
+    expect(localDate("2026-07-12T17:00:00+01:00")).toBe("2026-07-12");
+    expect(hourLabel("2026-07-12T17:00:00+01:00")).toBe("5pm");
+    expect(hourLabel("2026-07-12T07:00:00+01:00")).toBe("7am");
+    expect(hourLabel("2026-07-12T12:00:00+01:00")).toBe("12pm");
+    expect(hourLabel("2026-07-12T00:00:00+01:00")).toBe("12am");
+    expect(hourLabel("bad")).toBeNull();
   });
 });
 
