@@ -8,6 +8,8 @@ import {
   courtNumberFromName,
   localDate,
   hourLabel,
+  feedSlotStatus,
+  isNewlyAvailable,
 } from "./parse";
 
 // Trimmed real payloads from the Premier Tennis OpenActive feed.
@@ -106,6 +108,22 @@ describe("feed-reference + label helpers", () => {
     expect(hourLabel("2026-07-12T12:00:00+01:00")).toBe("12pm");
     expect(hourLabel("2026-07-12T00:00:00+01:00")).toBe("12am");
     expect(hourLabel("bad")).toBeNull();
+  });
+
+  it("feedSlotStatus maps remainingUses to the scraper's status words", () => {
+    expect(feedSlotStatus(1)).toBe("available");
+    expect(feedSlotStatus(3)).toBe("available");
+    expect(feedSlotStatus(0)).toBe("booked");
+    expect(feedSlotStatus(null)).toBe("booked");
+    expect(feedSlotStatus(undefined)).toBe("booked");
+  });
+
+  it("isNewlyAvailable fires only on a known non-available → available flip", () => {
+    expect(isNewlyAvailable("booked", "available")).toBe(true);
+    expect(isNewlyAvailable("closed", "available")).toBe(true);
+    expect(isNewlyAvailable(null, "available")).toBe(false); // backfill: never notify
+    expect(isNewlyAvailable("available", "available")).toBe(false); // no change
+    expect(isNewlyAvailable("booked", "booked")).toBe(false);
   });
 });
 

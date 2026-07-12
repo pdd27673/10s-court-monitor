@@ -71,6 +71,21 @@ export function hourLabel(iso: string): string | null {
   return `${h - 12}pm`;
 }
 
+/** Availability status from an RPDE slot's `remainingUses`: >0 = bookable, else
+ * taken. Uses the same status vocabulary as the HTML scraper ("available" |
+ * "booked") so feed rows and scraper rows are interchangeable. */
+export function feedSlotStatus(remainingUses: number | null | undefined): "available" | "booked" {
+  return remainingUses != null && remainingUses > 0 ? "available" : "booked";
+}
+
+/** Transition rule shared with the HTML differ (`differ.ts`): a slot is "newly
+ * available" only when it flips from a KNOWN non-available state to available.
+ * A null prior status — first time we've seen the slot, e.g. during a backfill —
+ * never counts, so backfills notify nothing. */
+export function isNewlyAvailable(oldStatus: string | null, newStatus: string): boolean {
+  return newStatus === "available" && oldStatus !== null && oldStatus !== "available";
+}
+
 // ---- FacilityUse ----
 
 export interface ParsedCourt {
