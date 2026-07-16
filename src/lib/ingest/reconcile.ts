@@ -325,6 +325,86 @@ async function upsertReconciledSlot(
     });
 }
 
+interface ReconcileRun {
+  slotsScraped: number;
+  upserted: number;
+  transitions: number;
+  errors: { venueSlug: string; date: string; error: string }[];
+  changes: SlotChange[];
+}
+
+/**
+ * Shared inner loop for the two scrape-backed clocks (2b reconcile + 3 sweep):
+ * for each target venue-day, scrape it, canonicalise each court label to the
+ * feed-owned row, and — SITE WINS — upsert the scraped truth, collecting
+ * booked/closed→available transitions. When `persist`, also advances that
+ * venue-day's round-robin cursor so Clock 3 re-baselines Clock 2 for free.
+ * Per-venue-day scrape failures are isolated so one dead page never sinks a run.
+ */
+async function scrapeAndReconcileVenueDays(
+  targets: { venueSlug: string; date: string }[],
+  venueIndex: Map<string, CourtsideVenue>,
+  persist: boolean
+): Promise<ReconcileRun> {
+  const changes: SlotChange[] = [];
+  const errors: { venueSlug: string; date: string; error: string }[] = [];
+  let slotsScraped = 0;
+  let upserted = 0;
+  let transitions = 0;
+
+  for (const vd of targets) {
+    const venue = venueIndex.get(vd.venueSlug);
+    if (!venue) continue;
+
+    let scraped;
+    try {
+      scraped = await scrapeCourtside(vd.venueSlug, vd.date);
+    } catch (e) {
+      errors.push({ venueSlug: vd.venueSlug, date: vd.date, error: (e as Error).message });
+      continue;
+    }
+    slotsScraped += scraped.length;
+
+    for (const s of scraped) {
+      const canon = canonicalCourtLabel(s.court, venue.courts);
+      if (!canon) continue;
+
+      const existing = await db.query.slots.findFirst({
+        where: and(
+          eq(slots.venueId, venue.id),
+          eq(slots.date, s.date),
+          eq(slots.time, s.time),
+          eq(slots.court, canon.court)
+        ),
+      });
+      const oldStatus = existing?.status ?? null;
+
+      if (isNewlyAvailable(oldStatus, s.status)) {
+        transitions++;
+        changes.push({
+          venue: vd.venueSlug,
+          venueName: venue.name,
+          date: s.date,
+          time: s.time,
+          court: canon.court,
+          oldStatus,
+          newStatus: s.status,
+          price: s.price,
+        });
+      }
+
+      if (persist) {
+        await upsertReconciledSlot(venue.id, s, canon);
+        upserted++;
+      }
+    }
+
+    if (persist) await markReconciled(vd.venueSlug, vd.date);
+  }
+
+  return { slotsScraped, upserted, transitions, errors, changes };
+}
+
 export interface ReconcileSummary {
   windowDays: number;
   /** pending venue-days after restricting to scrapeable Courtside venues. */
@@ -383,72 +463,66 @@ export async function reconcileWatchedVenueDays(
   const lastChecked = await loadReconcileState();
   const targets = selectReconcileTargets(pendingCourtside, lastChecked, maxPages);
 
-  const changes: SlotChange[] = [];
-  const errors: { venueSlug: string; date: string; error: string }[] = [];
-  let slotsScraped = 0;
-  let upserted = 0;
-  let transitions = 0;
-
-  for (const vd of targets) {
-    const venue = venueIndex.get(vd.venueSlug);
-    if (!venue) continue;
-
-    let scraped;
-    try {
-      scraped = await scrapeCourtside(vd.venueSlug, vd.date);
-    } catch (e) {
-      errors.push({ venueSlug: vd.venueSlug, date: vd.date, error: (e as Error).message });
-      continue;
-    }
-    slotsScraped += scraped.length;
-
-    for (const s of scraped) {
-      const canon = canonicalCourtLabel(s.court, venue.courts);
-      if (!canon) continue;
-
-      const existing = await db.query.slots.findFirst({
-        where: and(
-          eq(slots.venueId, venue.id),
-          eq(slots.date, s.date),
-          eq(slots.time, s.time),
-          eq(slots.court, canon.court)
-        ),
-      });
-      const oldStatus = existing?.status ?? null;
-
-      if (isNewlyAvailable(oldStatus, s.status)) {
-        transitions++;
-        changes.push({
-          venue: vd.venueSlug,
-          venueName: venue.name,
-          date: s.date,
-          time: s.time,
-          court: canon.court,
-          oldStatus,
-          newStatus: s.status,
-          price: s.price,
-        });
-      }
-
-      if (persist) {
-        await upsertReconciledSlot(venue.id, s, canon);
-        upserted++;
-      }
-    }
-
-    if (persist) await markReconciled(vd.venueSlug, vd.date);
-  }
+  const run = await scrapeAndReconcileVenueDays(targets, venueIndex, persist);
 
   return {
     windowDays: pending.windowDays,
     pendingVenueDays: pendingCourtside.length,
     scrapedVenueDays: targets.length,
     maxPages,
-    slotsScraped,
-    upserted,
-    transitions,
-    errors,
-    changes,
+    ...run,
+    persist,
+  };
+}
+
+// ============================================================================
+// Clock 3 — daily full sweep
+// ============================================================================
+
+export interface SweepSummary {
+  windowDays: number;
+  /** every Courtside venue-day scraped (all active courtside venues × window). */
+  venueDays: number;
+  slotsScraped: number;
+  upserted: number;
+  transitions: number;
+  errors: { venueSlug: string; date: string; error: string }[];
+  changes: SlotChange[];
+  persist: boolean;
+}
+
+/**
+ * Clock 3 of the hybrid ingestion — the daily full sweep. Scrapes EVERY active
+ * Courtside venue-day across the window (not just watched-pending ones), site-wins
+ * upserts, and returns transitions for `notifyUsers`. It is the dashboard
+ * correctness floor and the feed-drop safety net: it catches stale-feed misses on
+ * unwatched slots (no notification owed, but the dashboard should be right) and,
+ * by stamping each venue-day's reconcile cursor, re-baselines Clock 2 so the
+ * bounded reconcile doesn't redundantly re-scrape what the sweep just checked.
+ *
+ * `persist` defaults FALSE (same cutover gate as the other clocks). At the default
+ * 8-day window and the 7 Tower Hamlets venues that's ~56 venue-days/run, meant to
+ * run once per 24h — the cheapest of the three clocks.
+ */
+export async function fullSweep(
+  opts: { persist?: boolean; windowDays?: number } = {}
+): Promise<SweepSummary> {
+  const persist = opts.persist ?? false;
+  const windowDays = opts.windowDays ?? parseInt(process.env.SCRAPE_DAYS || "8", 10);
+  const dates = nextDates(windowDays);
+
+  const venueIndex = await loadCourtsideVenueIndex();
+  const targets: { venueSlug: string; date: string }[] = [];
+  for (const venueSlug of venueIndex.keys()) {
+    for (const date of dates) targets.push({ venueSlug, date });
+  }
+
+  const run = await scrapeAndReconcileVenueDays(targets, venueIndex, persist);
+
+  return {
+    windowDays,
+    venueDays: targets.length,
+    ...run,
     persist,
   };
 }

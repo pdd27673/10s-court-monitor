@@ -7,11 +7,24 @@ import { slots, notificationLog, scrapeTargets, feedState } from "@/lib/schema";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { proxyManager, formatBytes } from "@/lib/proxy-manager";
 import type { ScrapeStats } from "@/lib/scraper";
-import { ingestFacilities } from "@/lib/ingest/openactive/ingest";
+import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
+import { reconcileWatchedVenueDays, fullSweep } from "@/lib/ingest/reconcile";
+import type { SlotChange } from "@/lib/differ";
 
 // How often to refresh venue metadata + courts from the OpenActive facility feed.
 // Facilities change rarely, so this runs far less often than the slot scrape.
 const FACILITY_REFRESH_HOURS = parseInt(process.env.FACILITY_REFRESH_HOURS || "6", 10);
+
+// ---- Phase 3 feed-primary cutover switch ----
+// When FEED_INGEST_ENABLED=true the cron runs the 3-clock feed-primary ingestion
+// (Clock 1 head-poll + Clock 2b watch-reconcile + Clock 3 daily sweep) INSTEAD of
+// the blind HTML scrape. Default off → prod keeps the existing scraper untouched
+// (no regression); flipping the flag is the reversible cutover. Prereq before
+// flipping: `courts` populated in prod (facility ingest) and `slots` reset to
+// feed-owned rows (see docs/HANDOFF.md cutover procedure).
+const FEED_INGEST_ENABLED = process.env.FEED_INGEST_ENABLED === "true";
+const RECONCILE_INTERVAL_MIN = parseInt(process.env.RECONCILE_INTERVAL_MIN || "15", 10);
+const SWEEP_INTERVAL_HOURS = parseInt(process.env.SWEEP_INTERVAL_HOURS || "24", 10);
 
 /**
  * Refresh venue geo/address/amenities + the `courts` table from the OpenActive
@@ -154,6 +167,101 @@ async function runScrapeJob(force = false) {
   }
 }
 
+// Per-clock throttle, backed by feed_state(source='clock'). Lets one cron tick
+// run several clocks each on its own cadence. Checked before, stamped after a
+// successful run so a failed clock simply retries on the next tick.
+async function clockDue(feed: string, intervalMs: number): Promise<boolean> {
+  const [state] = await db
+    .select({ lastPolledAt: feedState.lastPolledAt })
+    .from(feedState)
+    .where(and(eq(feedState.source, "clock"), eq(feedState.feed, feed)))
+    .limit(1);
+  if (!state?.lastPolledAt) return true;
+  return Date.now() - new Date(state.lastPolledAt).getTime() >= intervalMs;
+}
+
+async function stampClock(feed: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .insert(feedState)
+    .values({ source: "clock", feed, lastPolledAt: now })
+    .onConflictDoUpdate({ target: [feedState.source, feedState.feed], set: { lastPolledAt: now } });
+}
+
+/**
+ * Phase 3 feed-primary ingestion: run the three hybrid clocks in one cron tick,
+ * INSTEAD of the blind HTML scrape. Each clock is failure-isolated so one bad
+ * clock never sinks the others; transitions from all clocks are unioned and
+ * handed to notifyUsers once (it dedups per channel via notification_log).
+ *   Clock 1 — feed head-poll, every tick (cheap at head).
+ *   Clock 2b — bounded watch-targeted reconcile, throttled to RECONCILE_INTERVAL_MIN.
+ *   Clock 3 — daily full sweep, throttled to SWEEP_INTERVAL_HOURS.
+ */
+async function runFeedIngest() {
+  try {
+    console.log("Starting feed-primary ingest (Clock 1 / 2b / 3)...");
+    await ensureVenuesExist();
+    // Keep venues/courts/geo fresh (throttled, failure-isolated). Also the
+    // prereq that populates `courts` so slot→court resolution works.
+    await maybeIngestFacilities();
+
+    const allChanges: SlotChange[] = [];
+
+    // Clock 1 — feed head-poll (delta). Runs every tick; near-free at head.
+    try {
+      const c1 = await pollSlots({ persist: true });
+      console.log(
+        `Clock 1 head-poll: ${c1.pages} pages, ${c1.resolved} resolved, ` +
+          `${c1.slotsUpserted} upserted, ${c1.transitions} transitions` +
+          `${c1.startedFromHead ? "" : " (initial backfill — notifies nothing)"}`
+      );
+      allChanges.push(...c1.changes);
+    } catch (error) {
+      console.error("Clock 1 head-poll failed (non-fatal):", error);
+    }
+
+    // Clock 2b — bounded watch-targeted reconcile (site wins), throttled.
+    if (await clockDue("reconcile", RECONCILE_INTERVAL_MIN * 60_000)) {
+      try {
+        const c2 = await reconcileWatchedVenueDays({ persist: true });
+        console.log(
+          `Clock 2b reconcile: scraped ${c2.scrapedVenueDays}/${c2.pendingVenueDays} pending ` +
+            `venue-days, ${c2.upserted} upserted, ${c2.transitions} transitions, ${c2.errors.length} errors`
+        );
+        allChanges.push(...c2.changes);
+        await stampClock("reconcile");
+      } catch (error) {
+        console.error("Clock 2b reconcile failed (non-fatal):", error);
+      }
+    }
+
+    // Clock 3 — daily full sweep (dashboard floor + feed-drop net), throttled.
+    if (await clockDue("sweep", SWEEP_INTERVAL_HOURS * 3600_000)) {
+      try {
+        const c3 = await fullSweep({ persist: true });
+        console.log(
+          `Clock 3 sweep: ${c3.venueDays} venue-days, ${c3.upserted} upserted, ` +
+            `${c3.transitions} transitions, ${c3.errors.length} errors`
+        );
+        allChanges.push(...c3.changes);
+        await stampClock("sweep");
+      } catch (error) {
+        console.error("Clock 3 sweep failed (non-fatal):", error);
+      }
+    }
+
+    if (allChanges.length > 0) {
+      console.log(`Notifying on ${allChanges.length} transition(s) across clocks`);
+      await notifyUsers(allChanges);
+    }
+
+    await runCleanup();
+    console.log("Feed ingest completed successfully");
+  } catch (error) {
+    console.error("Feed ingest failed:", error);
+  }
+}
+
 // Track if a scrape job is currently running to prevent concurrent executions
 let isJobRunning = false;
 
@@ -177,11 +285,13 @@ export async function POST(request: Request) {
 
   const force = new URL(request.url).searchParams.get("force") === "true";
 
-  // Start the scrape job in the background (don't await)
+  // Start the job in the background (don't await). The cutover switch selects the
+  // feed-primary 3-clock ingestion or the legacy blind HTML scrape.
   isJobRunning = true;
-  runScrapeJob(force)
+  const job = FEED_INGEST_ENABLED ? runFeedIngest() : runScrapeJob(force);
+  job
     .catch((error) => {
-      console.error("Unhandled error in scrape job:", error);
+      console.error("Unhandled error in cron job:", error);
     })
     .finally(() => {
       isJobRunning = false;
@@ -190,6 +300,10 @@ export async function POST(request: Request) {
   // Return immediately
   return NextResponse.json({
     success: true,
-    message: force ? "Forced full scrape started" : "Scrape job started",
+    message: FEED_INGEST_ENABLED
+      ? "Feed ingest started"
+      : force
+        ? "Forced full scrape started"
+        : "Scrape job started",
   });
 }
