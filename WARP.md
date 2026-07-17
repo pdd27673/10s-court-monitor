@@ -29,12 +29,12 @@ npm run db:seed      # Seed database with test user and venues
 ```bash
 npm run maintain     # Run maintenance tasks
 npm run soak-test    # Run soak/load testing
-npx tsx scripts/test-scraper.ts  # Test the scraper directly
+npx tsx scripts/poll-slots-preview.ts  # Read-only preview of the feed head-poll
 ```
 
 ### Manual Testing
 ```bash
-# Test scraper via API
+# Trigger a full ingest cycle via API
 curl http://localhost:3000/api/cron/scrape
 
 # Check health
@@ -48,18 +48,22 @@ curl "http://localhost:3000/api/availability?venue=victoria-park&date=2025-01-21
 
 ### Tech Stack
 - **Frontend/Backend**: Next.js 16 (App Router, React 19)
-- **Database**: SQLite with Drizzle ORM (WAL mode)
-- **Web Scraping**: Cheerio (HTML parsing, no browser required)
+- **Database**: Railway Postgres with Drizzle ORM (node-postgres)
+- **Ingestion**: OpenActive RPDE feed (primary) + Cheerio HTML scrape (reconcile backstop)
 - **Notifications**: Telegram Bot API, Gmail via Nodemailer
-- **Deployment**: Railway (recommended) with persistent volume for SQLite
+- **Deployment**: Railway (recommended)
 
 ### Core Components
 
-**Scraper Pipeline** (`src/lib/scraper.ts`)
-- Fetches HTML from tennistowerhamlets.com for 7 venues × 7 days
-- Parses availability tables using Cheerio selectors
-- No browser/Playwright needed - simple HTTP + DOM parsing
-- Returns structured slot data (venue, date, time, court, status, price)
+**Feed-primary ingestion** (`src/lib/ingest/`)
+- Clock 1 (`ingest/openactive/ingest.ts` `pollSlots`): applies OpenActive RPDE
+  deltas to `slots` — no HTML
+- Clock 2 (`ingest/reconcile.ts` `reconcileWatchedVenueDays`): bounded round-robin
+  scrape of watched-but-taken venue-days; site wins on any feed/site disagreement
+- Clock 3 (`ingest/reconcile.ts` `fullSweep`): daily scrape of every active
+  Courtside venue-day (dashboard floor + feed-drop net)
+- Scrapers (`src/lib/scrapers/courtside.ts`) return structured slot data
+  (venue, date, time, court, status, price) for Clocks 2/3
 
 **Change Detection** (`src/lib/differ.ts`)
 - Compares scraped slots against database state
@@ -136,9 +140,9 @@ sqlite3 data/tennis.db
 INSERT INTO users (email) VALUES ('user@example.com');
 ```
 
-### Testing Scraper Changes
+### Testing Ingest Changes
 ```bash
-npx tsx scripts/test-scraper.ts  # Tests ropemakers-field for next 2 days
+npx tsx scripts/reconcile-run-preview.ts  # Read-only preview of a reconcile run
 ```
 
 ### Testing Notifications

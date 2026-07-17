@@ -299,25 +299,34 @@ await sendTelegramNotification('YOUR_CHAT_ID', 'Test notification');
 
 ---
 
-## Running the Scraper
+## Running Ingestion
 
-### Manual Scrape (Development)
+### Manual Trigger (Development)
 
 ```bash
-# Trigger via API (GET works in dev mode)
+# Trigger a full ingest cycle via API (GET works in dev mode)
 curl http://localhost:3000/api/cron/scrape
 
-# Or run the test script
-npx tsx scripts/test-scraper.ts
+# Read-only previews of the individual clocks (write nothing):
+npx tsx scripts/poll-slots-preview.ts      # Clock 1 feed head-poll
+npx tsx scripts/reconcile-run-preview.ts   # Clock 2 watch-targeted reconcile
+npx tsx scripts/sweep-preview.ts           # Clock 3 daily full sweep
 ```
 
-### What the Scraper Does
+### What Ingestion Does
 
-1. Fetches availability from all 10 venues for the next 7 days
-2. Parses HTML using Cheerio (no browser needed)
-3. Stores slots in database
-4. Detects newly available slots (was booked -> now available)
-5. Notifies users whose watches match the available slots
+The Courtside path is **feed-primary** (official OpenActive RPDE change-feed), with
+a scoped HTML scrape kept only as a correctness backstop. One cron tick runs three
+clocks (see `docs/REARCHITECTURE-PLAN.md`):
+
+1. **Clock 1 — feed head-poll:** apply RPDE deltas to the `slots` table (no HTML)
+2. **Clock 2 — watch-targeted reconcile:** scrape a bounded round-robin of the
+   watched venue-days the feed shows as taken (site wins on any disagreement)
+3. **Clock 3 — daily full sweep:** scrape every active Courtside venue-day as the
+   dashboard floor + feed-drop safety net
+
+All three detect newly available slots (was booked/closed -> now available) and
+notify users whose watches match.
 
 ---
 
@@ -585,18 +594,20 @@ src/
 │   ├── db.ts                 # Drizzle client
 │   ├── schema.ts             # Database schema
 │   ├── constants.ts          # Venue list
-│   ├── scraper.ts            # HTTP + Cheerio scraping
-│   ├── differ.ts             # Change detection
+│   ├── ingest/               # Feed-primary ingestion (OpenActive + 3 clocks)
+│   │   ├── openactive/       # RPDE client, parsers, facility/slot ingest, poll
+│   │   └── reconcile.ts      # Clock 2 reconcile + Clock 3 full sweep
+│   ├── scrapers/             # Courtside/ClubSpark HTML fetchers (reconcile backstop)
+│   ├── differ.ts             # SlotChange type + ensureVenuesExist
 │   └── notifiers/
 │       ├── index.ts          # Notification orchestrator
 │       ├── email.ts          # Email via Resend HTTP API
 │       └── telegram.ts       # Telegram Bot API
 ├── scripts/
-│   ├── seed.ts                    # Database seeding
-│   ├── test-scraper.ts            # Scraper testing
-│   └── setup-telegram-webhook.ts  # Telegram webhook setup
+│   ├── setup-telegram-webhook.ts  # Telegram webhook setup
+│   └── *-preview.ts               # Read-only ingest clock previews
 └── data/
-    └── tennis.db             # SQLite database
+    └── tennis.db             # Legacy SQLite (prod runs on Railway Postgres)
 ```
 
 ### Shared contract (`packages/contract`)
