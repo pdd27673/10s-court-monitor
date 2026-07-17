@@ -22,8 +22,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@pdd27673/10s-contract": "file:packages/contract",
     "@auth/drizzle-adapter": "^1.11.1",
+    "@pdd27673/10s-contract": "file:packages/contract",
     "@tailwindcss/postcss": "^4",
     "better-sqlite3": "^12.6.2",
     "cheerio": "^1.1.2",
@@ -48,6 +48,7 @@
     "esbuild": "^0.25.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/pg": "^8.11.10",
