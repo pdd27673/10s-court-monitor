@@ -361,6 +361,10 @@ async function scrapeAndReconcileVenueDays(
       scraped = await scrapeCourtside(vd.venueSlug, vd.date);
     } catch (e) {
       errors.push({ venueSlug: vd.venueSlug, date: vd.date, error: (e as Error).message });
+      // Advance the round-robin cursor even on failure so a permanently-failing
+      // venue-day (persistent 404 / IP block) rotates to the back of the queue
+      // instead of sorting first forever and starving other pending venue-days.
+      if (persist) await markReconciled(vd.venueSlug, vd.date);
       continue;
     }
     slotsScraped += scraped.length;

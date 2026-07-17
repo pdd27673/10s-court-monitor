@@ -194,6 +194,23 @@ describe("reconcileWatchedVenueDays (DB) — site wins + canonical dedup", () =>
     expect(r.transitions).toBe(1); // the surviving venue-day still reconciled
   });
 
+  it("advances the round-robin cursor even when a scrape fails (no starvation)", async () => {
+    const v = await addVenue("victoria-park");
+    await addWatch(v, ["7pm"]);
+    await addSlot(v, TODAY, "7pm", "Court 1", "booked");
+    scrape.mockRejectedValue(new Error("IP blocked (404)"));
+
+    const r = await reconcileWatchedVenueDays({ persist: true, windowDays: 1 });
+    expect(r.errors).toHaveLength(1);
+
+    // cursor stamped despite the failure → next run rotates past it
+    const cur = await testDb()
+      .select()
+      .from(feedState)
+      .where(and(eq(feedState.source, "reconcile"), eq(feedState.feed, `victoria-park|${TODAY}`)));
+    expect(cur).toHaveLength(1);
+  });
+
   it("excludes non-Courtside (ClubSpark) venues from reconcile targets", async () => {
     const v = await addVenue("newham-clubspark", { sourceType: "clubspark" });
     await addWatch(v, ["7pm"]);
