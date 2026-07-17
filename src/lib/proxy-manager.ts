@@ -7,7 +7,6 @@ class ProxyManager {
   private username: string | null = null;
   private password: string | null = null;
   private requestCount = 0;
-  private sessionCount = 0;
   private totalBytes = 0;
   private initialized = false;
 
@@ -48,38 +47,8 @@ class ProxyManager {
     return new HttpsProxyAgent(proxyUrl);
   }
 
-  createStickySession(): { agent: HttpsProxyAgent<string>; sessionId: string } | null {
-    if (!this.initialized) {
-      this.initialize();
-    }
-
-    if (!this.host || !this.username || !this.password) {
-      return null;
-    }
-
-    this.sessionCount++;
-    this.requestCount++;
-
-    const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const stickyUsername = `${this.username}-session-${sessionId}`;
-    const proxyUrl = `http://${stickyUsername}:${this.password}@${this.host}:${this.port}`;
-
-    console.log(`🔗 Sticky session #${this.sessionCount} (${sessionId.slice(-6)})`);
-
-    return {
-      agent: new HttpsProxyAgent(proxyUrl),
-      sessionId,
-    };
-  }
-
   trackBytes(bytes: number) {
     this.totalBytes += bytes;
-  }
-
-  resetStats() {
-    this.requestCount = 0;
-    this.sessionCount = 0;
-    this.totalBytes = 0;
   }
 
   getStats() {
@@ -90,7 +59,6 @@ class ProxyManager {
       configured: !!(this.host && this.username && this.password),
       initialized: this.initialized,
       totalRequests: this.requestCount,
-      totalSessions: this.sessionCount,
       totalBytes: this.totalBytes,
     };
   }

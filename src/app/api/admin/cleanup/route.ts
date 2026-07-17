@@ -1,23 +1,11 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { users, slots, notificationLog } from "@/lib/schema";
-import { lt, sql } from "drizzle-orm";
-import { eq } from "drizzle-orm";
+import { requireAdmin } from "@/lib/admin-auth";
+import { cleanupOldData } from "@/lib/cleanup";
 
 export async function POST(request: Request) {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!user[0] || !user[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
 
     const body = await request.json();
     const days = body.days !== undefined ? body.days : 7;
@@ -30,22 +18,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Calculate cutoff date
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-    const cutoff = cutoffDate.toISOString().split("T")[0];
-
-    // Delete old data
-    const deletedSlots = await db.delete(slots).where(lt(slots.date, cutoff)).returning();
-    const deletedLogs = await db.delete(notificationLog).where(lt(notificationLog.sentAt, cutoff)).returning();
-
-    // Vacuum database
-    await db.execute(sql`VACUUM`);
+    const result = await cleanupOldData(days);
 
     return NextResponse.json({
       success: true,
-      deletedSlots: deletedSlots.length,
-      deletedLogs: deletedLogs.length,
+      deletedSlots: result.deletedSlots,
+      deletedLogs: result.deletedLogs,
     });
   } catch (error) {
     console.error("Error running cleanup:", error);

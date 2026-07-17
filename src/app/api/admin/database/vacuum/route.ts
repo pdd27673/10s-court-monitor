@@ -1,29 +1,19 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
-import { users } from "@/lib/schema";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 export async function POST() {
   try {
-    const session = await auth();
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
 
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    // ANALYZE updates planner statistics; safer than VACUUM on Railway Postgres
+    await db.execute(sql`ANALYZE`);
 
-    // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!user[0] || !user[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    // Run VACUUM to optimize the database
-    await db.execute(sql`VACUUM`);
-
-    return NextResponse.json({ success: true, message: "Database vacuumed successfully" });
+    return NextResponse.json({ success: true, message: "Database analyzed successfully" });
   } catch (error) {
-    console.error("Error vacuuming database:", error);
-    return NextResponse.json({ error: "Failed to vacuum database" }, { status: 500 });
+    console.error("Error analyzing database:", error);
+    return NextResponse.json({ error: "Failed to analyze database" }, { status: 500 });
   }
 }

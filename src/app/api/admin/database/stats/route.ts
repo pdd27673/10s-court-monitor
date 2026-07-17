@@ -1,22 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { users, watches, venues, slots, notificationChannels, notificationLog, registrationRequests } from "@/lib/schema";
-import { eq, count } from "drizzle-orm";
+import { count } from "drizzle-orm";
 
 export async function GET() {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!user[0] || !user[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
 
     // Get counts for all tables
     const [usersCount] = await db.select({ count: count() }).from(users);

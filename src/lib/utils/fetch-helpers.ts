@@ -22,21 +22,6 @@ export async function handleApiResponse<T = any>(response: Response): Promise<T>
 }
 
 /**
- * Safely parse an ID string to a number, throwing 400 if invalid
- * @param idString - The ID string to parse
- * @param paramName - Name of the parameter for error message
- * @returns Parsed number
- * @throws NextResponse with 400 if NaN
- */
-export function parseIdParam(idString: string, paramName: string = "id"): number {
-  const id = parseInt(idString, 10);
-  if (isNaN(id)) {
-    throw new Error(`Invalid ${paramName}: must be a number`);
-  }
-  return id;
-}
-
-/**
  * Safely parse session user ID to number
  * @param session - NextAuth session
  * @returns Parsed user ID

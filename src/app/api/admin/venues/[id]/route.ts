@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
-import { users, venues, watches, slots } from "@/lib/schema";
+import { venues, watches, slots } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
 export async function DELETE(
@@ -9,17 +9,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!adminUser[0] || !adminUser[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
 
     const { id } = await params;
     const venueId = parseInt(id, 10);
