@@ -6,6 +6,7 @@ import { slots, notificationLog, feedState } from "@/lib/schema";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
 import { reconcileWatchedVenueDays, fullSweep } from "@/lib/ingest/reconcile";
+import { pollClubSpark } from "@/lib/ingest/clubspark/ingest";
 import type { SlotChange } from "@/lib/differ";
 
 // How often to refresh venue metadata + courts from the OpenActive facility feed.
@@ -15,6 +16,10 @@ const FACILITY_REFRESH_HOURS = parseInt(process.env.FACILITY_REFRESH_HOURS || "6
 // Clock cadences (each throttled independently within one cron tick).
 const RECONCILE_INTERVAL_MIN = parseInt(process.env.RECONCILE_INTERVAL_MIN || "15", 10);
 const SWEEP_INTERVAL_HOURS = parseInt(process.env.SWEEP_INTERVAL_HOURS || "24", 10);
+// ClubSpark (Newham) is a full-snapshot JSON poll, not an RPDE delta feed — one
+// call per venue covers the whole window, so a modest cadence stays polite while
+// beating the retired scraper's ~10-min cron.
+const CLUBSPARK_INTERVAL_MIN = parseInt(process.env.CLUBSPARK_INTERVAL_MIN || "5", 10);
 
 // Protect the cron endpoint with a secret (skip in development)
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -106,6 +111,7 @@ async function stampClock(feed: string): Promise<void> {
  * from all clocks are unioned and handed to notifyUsers once (it dedups per
  * channel via notification_log).
  *   Clock 1 — feed head-poll, every tick (cheap at head).
+ *   ClubSpark — Newham full-snapshot poll, throttled to CLUBSPARK_INTERVAL_MIN.
  *   Clock 2b — bounded watch-targeted reconcile, throttled to RECONCILE_INTERVAL_MIN.
  *   Clock 3 — daily full sweep, throttled to SWEEP_INTERVAL_HOURS.
  */
@@ -130,6 +136,22 @@ async function runFeedIngest() {
       allChanges.push(...c1.changes);
     } catch (error) {
       console.error("Clock 1 head-poll failed (non-fatal):", error);
+    }
+
+    // ClubSpark (Newham) — first-party JSON snapshot poll, throttled. Direct
+    // truth (no RPDE staleness), so it needs no reconcile clock of its own.
+    if (await clockDue("clubspark", CLUBSPARK_INTERVAL_MIN * 60_000)) {
+      try {
+        const cs = await pollClubSpark({ persist: true });
+        console.log(
+          `ClubSpark poll: ${cs.venues} venues, ${cs.slotsScraped} scraped, ` +
+            `${cs.slotsUpserted} upserted, ${cs.transitions} transitions, ${cs.errors.length} errors`
+        );
+        allChanges.push(...cs.changes);
+        await stampClock("clubspark");
+      } catch (error) {
+        console.error("ClubSpark poll failed (non-fatal):", error);
+      }
     }
 
     // Clock 2b — bounded watch-targeted reconcile (site wins), throttled.

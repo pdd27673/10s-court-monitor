@@ -7,6 +7,7 @@ import { ensureVenuesExist } from "@/lib/differ";
 import { notifyUsers } from "@/lib/notifiers";
 import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
 import { fullSweep } from "@/lib/ingest/reconcile";
+import { pollClubSpark } from "@/lib/ingest/clubspark/ingest";
 import type { SlotChange } from "@/lib/differ";
 
 /**
@@ -38,6 +39,8 @@ export async function POST() {
         const changes: SlotChange[] = [];
         const poll = await pollSlots({ persist: true });
         changes.push(...poll.changes);
+        const clubspark = await pollClubSpark({ persist: true });
+        changes.push(...clubspark.changes);
         const sweep = await fullSweep({ persist: true });
         changes.push(...sweep.changes);
 
@@ -47,6 +50,7 @@ export async function POST() {
 
         console.log(
           `Manual ingest completed: poll ${poll.slotsUpserted} upserts / ${poll.transitions} transitions, ` +
+            `clubspark ${clubspark.slotsUpserted} upserts / ${clubspark.transitions} transitions, ` +
             `sweep ${sweep.upserted} upserts / ${sweep.transitions} transitions`
         );
       } catch (error) {
