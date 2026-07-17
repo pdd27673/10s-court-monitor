@@ -3,7 +3,7 @@
 # sqlite->postgres data-migration + legacy watch-migration scripts).
 
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake"]
+nixPkgs = ["nodejs_24", "python3", "gcc", "gnumake"]
 
 [phases.install]
 cmds = ["npm ci --include=dev"]
