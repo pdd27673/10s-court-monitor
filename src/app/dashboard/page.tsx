@@ -4680,7 +4680,7 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
   };
 
   const handleVacuum = async () => {
-    if (!confirm("Run VACUUM on the database? This will optimize the database file size.")) {
+    if (!confirm("Run ANALYZE to refresh Postgres planner statistics?")) {
       return;
     }
 
@@ -4689,12 +4689,12 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
         method: "POST",
       });
 
-      if (!res.ok) throw new Error("Vacuum failed");
+      if (!res.ok) throw new Error("Analyze failed");
 
       await fetchDbStats();
-      showMessage("success", "Database vacuumed successfully");
+      showMessage("success", "Database analyzed successfully");
     } catch {
-      showMessage("error", "Failed to vacuum database");
+      showMessage("error", "Failed to analyze database");
     }
   };
 
@@ -4743,15 +4743,15 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
           </div>
 
           <div className="border rounded-lg p-4">
-            <h3 className="font-semibold mb-2">Vacuum Database</h3>
+            <h3 className="font-semibold mb-2">Analyze Database</h3>
             <p className="text-sm text-[var(--text-2)] mb-3">
-              Optimize database file size by reclaiming unused space
+              Update Postgres planner statistics (ANALYZE). Autovacuum handles space reclaim on Railway.
             </p>
             <button
               onClick={handleVacuum}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
             >
-              Run VACUUM
+              Run ANALYZE
             </button>
           </div>
         </div>
@@ -4763,15 +4763,15 @@ function AdminDatabase({ showMessage }: { showMessage: (type: "success" | "error
         <div className="space-y-3">
           <div className="flex items-center justify-between py-2 border-b">
             <span className="text-sm font-medium text-[var(--text-2)]">Database Type</span>
-            <span className="text-sm">SQLite</span>
+            <span className="text-sm">PostgreSQL</span>
           </div>
           <div className="flex items-center justify-between py-2 border-b">
             <span className="text-sm font-medium text-[var(--text-2)]">ORM</span>
             <span className="text-sm">Drizzle ORM</span>
           </div>
           <div className="flex items-center justify-between py-2 border-b">
-            <span className="text-sm font-medium text-[var(--text-2)]">Database File</span>
-            <span className="text-sm font-mono text-xs">sqlite.db</span>
+            <span className="text-sm font-medium text-[var(--text-2)]">Hosted on</span>
+            <span className="text-sm font-mono text-xs">Railway Postgres</span>
           </div>
           <div className="flex items-center justify-between py-2">
             <span className="text-sm font-medium text-[var(--text-2)]">Last Backup</span>

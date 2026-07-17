@@ -1,9 +1,8 @@
-# Nixpacks configuration for Railway
-# python3/gcc/gnumake remain for better-sqlite3 (used only by the one-off
-# sqlite->postgres data-migration + legacy watch-migration scripts).
+# Nixpacks configuration for Railway.
+# Runtime is Node 24 + Postgres (pg). No native addon compile toolchain.
 
 [phases.setup]
-nixPkgs = ["nodejs_24", "python3", "gcc", "gnumake"]
+nixPkgs = ["nodejs_24"]
 
 [phases.install]
 cmds = ["npm ci --include=dev"]

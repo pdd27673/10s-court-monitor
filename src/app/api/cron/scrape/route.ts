@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import { ensureVenuesExist } from "@/lib/differ";
 import { notifyUsers } from "@/lib/notifiers";
 import { db } from "@/lib/db";
-import { slots, notificationLog, feedState } from "@/lib/schema";
-import { and, eq, lt, sql } from "drizzle-orm";
+import { feedState } from "@/lib/schema";
+import { and, eq } from "drizzle-orm";
 import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
 import { reconcileWatchedVenueDays, fullSweep } from "@/lib/ingest/reconcile";
 import { pollClubSpark } from "@/lib/ingest/clubspark/ingest";
+import { cleanupOldData } from "@/lib/cleanup";
 import type { SlotChange } from "@/lib/differ";
 
 // How often to refresh venue metadata + courts from the OpenActive facility feed.
@@ -61,24 +62,11 @@ async function maybeIngestFacilities() {
 async function runCleanup() {
   try {
     console.log("Running cleanup...");
-
-    // Keep data for 7 days (can be configured)
     const daysToKeep = parseInt(process.env.CLEANUP_DAYS || "7", 10);
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-    const cutoff = cutoffDate.toISOString().split("T")[0];
-
-    // Delete old slots
-    const deletedSlots = await db.delete(slots).where(lt(slots.date, cutoff)).returning();
-    console.log(`Deleted ${deletedSlots.length} old slots (before ${cutoff})`);
-
-    // Delete old notification logs
-    const deletedLogs = await db.delete(notificationLog).where(lt(notificationLog.sentAt, cutoff)).returning();
-    console.log(`Deleted ${deletedLogs.length} old notification logs`);
-
-    // Vacuum database to reclaim space
-    await db.execute(sql`VACUUM`);
-    console.log("Database vacuumed");
+    const result = await cleanupOldData(daysToKeep);
+    console.log(
+      `Deleted ${result.deletedSlots} old slots and ${result.deletedLogs} notification logs (before ${result.cutoff})`
+    );
   } catch (error) {
     console.error("Cleanup failed:", error);
   }
