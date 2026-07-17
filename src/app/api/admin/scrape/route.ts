@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { users } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { requireAdmin } from "@/lib/admin-auth";
 import { ensureVenuesExist } from "@/lib/differ";
 import { notifyUsers } from "@/lib/notifiers";
 import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
@@ -18,17 +15,8 @@ import type { SlotChange } from "@/lib/differ";
  */
 export async function POST() {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const user = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!user[0] || !user[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
 
     // Run ingestion in the background
     (async () => {

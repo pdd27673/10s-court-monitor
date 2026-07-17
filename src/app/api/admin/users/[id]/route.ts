@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
@@ -9,17 +9,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!adminUser[0] || !adminUser[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
+    const adminUser = gate.admin;
 
     const { id } = await params;
     const userId = parseInt(id, 10);
@@ -32,7 +24,7 @@ export async function PUT(
     const { name, isAllowed, isAdmin } = body;
 
     // Prevent admin from demoting themselves
-    if (userId === adminUser[0].id && isAdmin === false) {
+    if (userId === adminUser.id && isAdmin === false) {
       return NextResponse.json(
         { error: "Cannot remove your own admin privileges" },
         { status: 403 }
@@ -66,17 +58,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!adminUser[0] || !adminUser[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
+    const adminUser = gate.admin;
 
     const { id } = await params;
     const userId = parseInt(id, 10);
@@ -86,7 +70,7 @@ export async function DELETE(
     }
 
     // Prevent admin from deleting themselves
-    if (userId === adminUser[0].id) {
+    if (userId === adminUser.id) {
       return NextResponse.json(
         { error: "Cannot delete your own account" },
         { status: 403 }

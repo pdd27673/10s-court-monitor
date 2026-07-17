@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/admin-auth";
 import { db } from "@/lib/db";
 import { users, registrationRequests } from "@/lib/schema";
 import { eq } from "drizzle-orm";
@@ -11,17 +11,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!adminUser[0] || !adminUser[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
+    const adminUser = gate.admin;
 
     const { id } = await params;
     const requestId = parseInt(id, 10);
@@ -80,7 +72,7 @@ export async function PUT(
         .set({
           status: "approved",
           reviewedAt: new Date().toISOString(),
-          reviewedBy: adminUser[0].id,
+          reviewedBy: adminUser.id,
         })
         .where(eq(registrationRequests.id, requestId));
 
@@ -119,7 +111,7 @@ export async function PUT(
         .set({
           status: "rejected",
           reviewedAt: new Date().toISOString(),
-          reviewedBy: adminUser[0].id,
+          reviewedBy: adminUser.id,
         })
         .where(eq(registrationRequests.id, requestId));
 
@@ -154,17 +146,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth();
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const adminUser = await db.select().from(users).where(eq(users.email, session.user.email.toLowerCase())).limit(1);
-    if (!adminUser[0] || !adminUser[0].isAdmin) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const gate = await requireAdmin();
+    if ("error" in gate) return gate.error;
 
     const { id } = await params;
     const requestId = parseInt(id, 10);
