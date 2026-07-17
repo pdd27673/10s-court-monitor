@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SlotChange } from "../differ";
 import type { ScrapeStats } from "./email";
 
-// Mock resend before the module under test imports it.
+// Mock resend before the module under test imports it. A class (not a
+// vi.fn().mockImplementation) so `new Resend()` is always a valid constructor —
+// the mock-fn form is not reliably constructable across runners.
 const mockEmailSend = vi.fn();
 vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({ emails: { send: mockEmailSend } })),
+  Resend: class {
+    emails = { send: mockEmailSend };
+  },
 }));
 
 function change(over: Partial<SlotChange> = {}): SlotChange {
