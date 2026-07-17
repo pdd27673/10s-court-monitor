@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ScrapeStats } from "../scraper";
+import type { ScrapeStats } from "./email";
 
 // Mock resend before any module imports
 const mockEmailSend = vi.fn();

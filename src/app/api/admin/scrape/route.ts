@@ -3,10 +3,18 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getNextNDays, runFullScrape } from "@/lib/scraper";
-import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
-import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
+import { ensureVenuesExist } from "@/lib/differ";
+import { notifyUsers } from "@/lib/notifiers";
+import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
+import { fullSweep } from "@/lib/ingest/reconcile";
+import type { SlotChange } from "@/lib/differ";
 
+/**
+ * Admin "refresh now" trigger. Runs the feed-primary ingestion on demand,
+ * unthrottled: refresh venues/courts from the facility feed, delta-poll the
+ * slots feed (Clock 1), then a full sweep (Clock 3) as the correctness floor.
+ * Transitions from both are unioned into one notifyUsers call.
+ */
 export async function POST() {
   try {
     const session = await auth();
@@ -21,39 +29,34 @@ export async function POST() {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Run scrape in background
+    // Run ingestion in the background
     (async () => {
       try {
         await ensureVenuesExist();
+        await ingestFacilities();
 
-        // Get next N days (configurable via SCRAPE_DAYS env var, default 9)
-        const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "9", 10);
-        const dates = getNextNDays(scrapeDays);
+        const changes: SlotChange[] = [];
+        const poll = await pollSlots({ persist: true });
+        changes.push(...poll.changes);
+        const sweep = await fullSweep({ persist: true });
+        changes.push(...sweep.changes);
 
-        // Run full scrape with timing and stats
-        const { slots: allSlots, stats } = await runFullScrape(dates);
-
-        // Check for high failure rate and alert admin
-        await sendScrapeFailureAlert(stats);
-
-        // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
-        await sendScrapeSummary(stats);
-
-        // Store slots and detect changes
-        const changes = await storeAndDiff(allSlots);
         if (changes.length > 0) {
           await notifyUsers(changes);
         }
 
-        console.log("Manual scrape completed successfully");
+        console.log(
+          `Manual ingest completed: poll ${poll.slotsUpserted} upserts / ${poll.transitions} transitions, ` +
+            `sweep ${sweep.upserted} upserts / ${sweep.transitions} transitions`
+        );
       } catch (error) {
-        console.error("Manual scrape failed:", error);
+        console.error("Manual ingest failed:", error);
       }
     })();
 
-    return NextResponse.json({ success: true, message: "Scrape started" });
+    return NextResponse.json({ success: true, message: "Ingest started" });
   } catch (error) {
-    console.error("Error starting scrape:", error);
-    return NextResponse.json({ error: "Failed to start scrape" }, { status: 500 });
+    console.error("Error starting ingest:", error);
+    return NextResponse.json({ error: "Failed to start ingest" }, { status: 500 });
   }
 }

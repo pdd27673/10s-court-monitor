@@ -191,8 +191,9 @@ export const registrationRequests = pgTable(
 );
 
 // RPDE / interval feed cursors — one row per (source, feed). Persists the RPDE
-// `next` cursor so polling resumes where it left off. Replaces scrape_targets
-// for feed-based ingestion in a later phase.
+// `next` cursor so polling resumes where it left off. Also namespaces the Clock
+// 2b reconcile round-robin (source='reconcile') and per-clock cron throttles
+// (source='clock'). Replaced the retired `scrape_targets` scheduler.
 export const feedState = pgTable(
   "feed_state",
   {
@@ -206,16 +207,6 @@ export const feedState = pgTable(
     uniqueFeed: unique().on(table.source, table.feed),
   })
 );
-
-// Tracks scraping schedule for each venue-date combination
-export const scrapeTargets = pgTable("scrape_targets", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  venueSlug: text("venue_slug").notNull(),
-  date: text("date").notNull(), // YYYY-MM-DD
-  lastScrapedAt: text("last_scraped_at"), // ISO timestamp
-  nextScrapeAt: text("next_scrape_at"), // ISO timestamp - when next scrape is due
-  createdAt: text("created_at").default(nowText),
-});
 
 // ============================================
 // NextAuth tables (JWT sessions - no sessions table needed)
@@ -247,4 +238,3 @@ export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type NotificationLogEntry = typeof notificationLog.$inferSelect;
 export type VerificationToken = typeof verificationTokens.$inferSelect;
 export type RegistrationRequest = typeof registrationRequests.$inferSelect;
-export type ScrapeTarget = typeof scrapeTargets.$inferSelect;
