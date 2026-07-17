@@ -52,6 +52,11 @@ export interface WalkOptions {
   /** safety cap on pages per walk (default 5000). */
   maxPages?: number;
   signal?: AbortSignal;
+  /** when set, log walk progress every `progressEvery` pages under this label
+   * (so a long backfill isn't a silent multi-second wait). */
+  label?: string;
+  /** pages between progress logs (default 20); only used when `label` is set. */
+  progressEvery?: number;
 }
 
 export interface WalkResult {
@@ -71,7 +76,7 @@ export async function walkToHead<T = unknown>(
   onItems: (items: RpdeItem<T>[], page: RpdePage<T>) => Promise<void> | void,
   opts: WalkOptions = {}
 ): Promise<WalkResult> {
-  const { paceMs = 350, maxPages = 5000, signal } = opts;
+  const { paceMs = 350, maxPages = 5000, signal, label, progressEvery = 20 } = opts;
   let url = startUrl;
   let pages = 0;
   let items = 0;
@@ -82,6 +87,9 @@ export async function walkToHead<T = unknown>(
     if (page.items.length > 0) {
       items += page.items.length;
       await onItems(page.items, page);
+    }
+    if (label && progressEvery > 0 && pages % progressEvery === 0) {
+      console.log(`   … ${label}: walked ${pages} pages, ${items} items so far`);
     }
     // Head reached: RPDE signals it with an empty page whose `next` points back
     // at the same cursor. Persist `page.next` and stop.

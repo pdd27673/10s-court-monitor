@@ -49,9 +49,9 @@ async function maybeIngestFacilities() {
 
     const summary = await ingestFacilities();
     console.log(
-      `Facility ingest: ${summary.londonVenues} London venues (` +
-        `${summary.venuesInserted} new, ${summary.venuesUpdated} updated), ` +
-        `${summary.courtsUpserted} courts, ${summary.pages} pages`
+      `Facility ingest: ${summary.pages} pages, ${summary.itemsSeen} items seen → ` +
+        `${summary.londonVenues} London venues (${summary.venuesInserted} new, ` +
+        `${summary.venuesUpdated} updated), ${summary.courtsUpserted} courts`
     );
   } catch (error) {
     console.error("Facility ingest failed (non-fatal):", error);
@@ -105,6 +105,35 @@ async function stampClock(feed: string): Promise<void> {
     .onConflictDoUpdate({ target: [feedState.source, feedState.feed], set: { lastPolledAt: now } });
 }
 
+// How many individual transition lines to print per clock before summarizing the
+// rest as a count — keeps a busy tick readable without hiding the flips entirely.
+const MAX_CHANGE_LINES = 25;
+
+/** Log each booked/closed→available flip a clock found (bounded), so the notify
+ * path is auditable from the logs alone. */
+function logChanges(clock: string, changes: SlotChange[]): void {
+  for (const c of changes.slice(0, MAX_CHANGE_LINES)) {
+    console.log(
+      `   🎾 ${clock}: ${c.venue} | ${c.date} ${c.time} | ${c.court}  ` +
+        `${c.oldStatus ?? "∅"} → ${c.newStatus}${c.price ? `  ${c.price}` : ""}`
+    );
+  }
+  if (changes.length > MAX_CHANGE_LINES) {
+    console.log(`   … and ${changes.length - MAX_CHANGE_LINES} more ${clock} transition(s)`);
+  }
+}
+
+/** Roll up a clock's per-venue-day errors into "N× <reason>" lines so a bulk
+ * failure (e.g. every venue 404ing with the proxy off) reads as one summary
+ * rather than dozens of identical lines. */
+function logErrorRollup(clock: string, errors: { error: string }[]): void {
+  if (!errors.length) return;
+  const byReason = new Map<string, number>();
+  for (const e of errors) byReason.set(e.error, (byReason.get(e.error) ?? 0) + 1);
+  const rolled = [...byReason.entries()].map(([reason, n]) => `${n}× ${reason}`).join("; ");
+  console.warn(`   ⚠️  ${clock} errors (${errors.length}): ${rolled}`);
+}
+
 /**
  * Feed-primary ingestion: run the three hybrid clocks in one cron tick. Each
  * clock is failure-isolated so one bad clock never sinks the others; transitions
@@ -128,11 +157,19 @@ async function runFeedIngest() {
     // Clock 1 — feed head-poll (delta). Runs every tick; near-free at head.
     try {
       const c1 = await pollSlots({ persist: true });
+      const mode = c1.startedFromHead ? "delta from head" : "INITIAL BACKFILL — notifies nothing";
       console.log(
-        `Clock 1 head-poll: ${c1.pages} pages, ${c1.resolved} resolved, ` +
-          `${c1.slotsUpserted} upserted, ${c1.transitions} transitions` +
-          `${c1.startedFromHead ? "" : " (initial backfill — notifies nothing)"}`
+        `Clock 1 OpenActive head-poll (${mode}): ${c1.pages} pages walked, ` +
+          `${c1.updated} updated + ${c1.deleted} deleted items seen, ` +
+          `${c1.resolved} resolved / ${c1.unresolved} unresolved, ` +
+          `${c1.slotsUpserted} upserted, ${c1.transitions} transitions`
       );
+      const perVenue = Object.entries(c1.byVenue).sort((a, b) => b[1] - a[1]);
+      if (perVenue.length) {
+        console.log(`   by venue: ${perVenue.map(([slug, n]) => `${slug}=${n}`).join(", ")}`);
+      }
+      console.log(`   feed head cursor → ${c1.cursor}`);
+      logChanges("Clock 1", c1.changes);
       allChanges.push(...c1.changes);
     } catch (error) {
       console.error("Clock 1 head-poll failed (non-fatal):", error);
@@ -144,9 +181,12 @@ async function runFeedIngest() {
       try {
         const cs = await pollClubSpark({ persist: true });
         console.log(
-          `ClubSpark poll: ${cs.venues} venues, ${cs.slotsScraped} scraped, ` +
-            `${cs.slotsUpserted} upserted, ${cs.transitions} transitions, ${cs.errors.length} errors`
+          `ClubSpark (Newham) poll: ${cs.venues} venues, ${cs.slotsScraped} scraped, ` +
+            `${cs.courtsUpserted} courts, ${cs.slotsUpserted} upserted, ${cs.transitions} transitions, ` +
+            `${cs.errors.length} errors`
         );
+        logErrorRollup("ClubSpark", cs.errors);
+        logChanges("ClubSpark", cs.changes);
         allChanges.push(...cs.changes);
         await stampClock("clubspark");
       } catch (error) {
@@ -160,8 +200,11 @@ async function runFeedIngest() {
         const c2 = await reconcileWatchedVenueDays({ persist: true });
         console.log(
           `Clock 2b reconcile: scraped ${c2.scrapedVenueDays}/${c2.pendingVenueDays} pending ` +
-            `venue-days, ${c2.upserted} upserted, ${c2.transitions} transitions, ${c2.errors.length} errors`
+            `venue-days (budget ${c2.maxPages}), ${c2.slotsScraped} slots, ${c2.upserted} upserted, ` +
+            `${c2.transitions} transitions, ${c2.errors.length} errors`
         );
+        logErrorRollup("Clock 2b", c2.errors);
+        logChanges("Clock 2b", c2.changes);
         allChanges.push(...c2.changes);
         await stampClock("reconcile");
       } catch (error) {
@@ -174,9 +217,11 @@ async function runFeedIngest() {
       try {
         const c3 = await fullSweep({ persist: true });
         console.log(
-          `Clock 3 sweep: ${c3.venueDays} venue-days, ${c3.upserted} upserted, ` +
+          `Clock 3 sweep: ${c3.venueDays} venue-days, ${c3.slotsScraped} slots, ${c3.upserted} upserted, ` +
             `${c3.transitions} transitions, ${c3.errors.length} errors`
         );
+        logErrorRollup("Clock 3", c3.errors);
+        logChanges("Clock 3", c3.changes);
         allChanges.push(...c3.changes);
         await stampClock("sweep");
       } catch (error) {

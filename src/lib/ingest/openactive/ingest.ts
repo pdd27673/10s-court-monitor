@@ -98,7 +98,7 @@ export async function ingestFacilities(opts: { startCursor?: string; dryRun?: bo
         else latest.set(String(it.id), it);
       }
     },
-    { paceMs: opts.paceMs ?? 350 }
+    { paceMs: opts.paceMs ?? 350, label: "facility-uses" }
   );
 
   let londonVenues = 0;
@@ -275,7 +275,7 @@ export async function ingestSlots(
         }
       }
     },
-    { paceMs: opts.paceMs ?? 350, maxPages: opts.maxPages ?? 5000 }
+    { paceMs: opts.paceMs ?? 350, maxPages: opts.maxPages ?? 5000, label: "slots backfill" }
   );
 
   let updated = 0;
@@ -337,6 +337,7 @@ export interface SlotPollSummary {
   startedFromHead: boolean; // false = full backfill (no saved cursor yet)
   persist: boolean;
   changes: SlotChange[]; // transitions, ready to hand to notifyUsers()
+  byVenue: Record<string, number>; // resolved slots per venue slug (for logging)
 }
 
 /**
@@ -399,10 +400,11 @@ export async function pollSlots(
         }
       }
     },
-    { paceMs: opts.paceMs ?? 350, maxPages: opts.maxPages ?? 5000 }
+    { paceMs: opts.paceMs ?? 350, maxPages: opts.maxPages ?? 5000, label: startedFromHead ? "slots head-poll" : "slots backfill" }
   );
 
   const changes: SlotChange[] = [];
+  const byVenue: Record<string, number> = {};
   let updated = 0;
   let resolved = 0;
   let unresolved = 0;
@@ -418,6 +420,7 @@ export async function pollSlots(
     const time = hourLabel(s.startsAt);
     if (!court || !time) { unresolved++; continue; }
     resolved++;
+    byVenue[court.venueSlug] = (byVenue[court.venueSlug] ?? 0) + 1;
 
     const { status: newStatus, courtLabel, values } = slotRowValues(court, s, date, time);
 
@@ -474,5 +477,6 @@ export async function pollSlots(
     startedFromHead,
     persist,
     changes,
+    byVenue,
   };
 }
