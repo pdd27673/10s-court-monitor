@@ -23,6 +23,7 @@ import {
   hourLabel,
   localDate,
   courtNumberFromName,
+  facilityIdFromRef,
   feedSlotStatus,
   isNewlyAvailable,
   type ParsedVenue,
@@ -31,6 +32,46 @@ import {
 
 /** The RPDE slots feed name, as stored in `feed_state.feed`. */
 const SLOT_FEED = "individual-facility-use-slots";
+
+/**
+ * Why an updated slot didn't resolve to one of our courts. The slots feed is
+ * Premier Tennis *national*, but we only seed London venues, so most deltas are
+ * for courts we deliberately don't track. Splitting the count keeps a benign
+ * national-feed miss ("foreign") distinct from a real seeding gap
+ * ("unmappedCourt": a venue we DO track whose specific court @id isn't in
+ * `courts`) — the latter is the only one worth an alert.
+ */
+export interface UnresolvedBreakdown {
+  /** court's parent facility isn't one we track — other operator/region (expected). */
+  foreign: number;
+  /** parent facility IS tracked but this court @id isn't seeded (real gap → check facility ingest). */
+  unmappedCourt: number;
+  /** couldn't derive an hour label from the slot's startDate. */
+  noTime: number;
+  /** slot payload was missing @id / facilityUse / startDate. */
+  badData: number;
+}
+
+const newBreakdown = (): UnresolvedBreakdown => ({ foreign: 0, unmappedCourt: 0, noTime: 0, badData: 0 });
+
+/** The set of parent facility ids we have at least one seeded court for, derived
+ * from the court index (`facilityIdFromRef` of each court's external_id). Lets an
+ * unresolved slot be classed as a tracked-venue gap vs national-feed noise. */
+function trackedFacilityIds(courtIndex: Map<string, CourtRef>): Set<string> {
+  const s = new Set<string>();
+  for (const key of courtIndex.keys()) {
+    const fid = facilityIdFromRef(key);
+    if (fid) s.add(fid);
+  }
+  return s;
+}
+
+/** Bucket a court-not-found slot: parent facility we track (court missing → real
+ * gap) vs a facility we don't track at all (benign national-feed noise). */
+function unresolvedReason(courtExternalId: string, tracked: Set<string>): "unmappedCourt" | "foreign" {
+  const fid = facilityIdFromRef(courtExternalId);
+  return fid && tracked.has(fid) ? "unmappedCourt" : "foreign";
+}
 
 export interface IngestSummary {
   pages: number;
@@ -148,6 +189,7 @@ export interface SlotIngestSummary {
   deleted: number; // deleted slot items seen
   resolved: number; // updated slots whose court mapped to a known London court
   unresolved: number; // updated slots we couldn't place (court not in DB / not London)
+  unresolvedBy: UnresolvedBreakdown; // why they didn't resolve (foreign vs real gap)
   slotsUpserted: number; // rows written (0 unless persist)
   cursor: string;
   persist: boolean;
@@ -259,6 +301,7 @@ export async function ingestSlots(
 ): Promise<SlotIngestSummary> {
   const persist = opts.persist ?? false;
   const courtIndex = await loadCourtIndex();
+  const tracked = trackedFacilityIds(courtIndex);
 
   // Collect the latest state per slot across the walk (updated wins; deleted drops).
   const latest = new Map<string, RpdeItem<Record<string, unknown>>>();
@@ -281,16 +324,18 @@ export async function ingestSlots(
   let updated = 0;
   let resolved = 0;
   let unresolved = 0;
+  const unresolvedBy = newBreakdown();
   let slotsUpserted = 0;
 
   for (const it of latest.values()) {
     updated++;
     const s = parseSlot(it.data ?? {});
-    if (!s) { unresolved++; continue; }
+    if (!s) { unresolved++; unresolvedBy.badData++; continue; }
     const court = courtIndex.get(s.courtExternalId);
+    if (!court) { unresolved++; unresolvedBy[unresolvedReason(s.courtExternalId, tracked)]++; continue; }
     const date = localDate(s.startsAt);
     const time = hourLabel(s.startsAt);
-    if (!court || !time) { unresolved++; continue; }
+    if (!time) { unresolved++; unresolvedBy.noTime++; continue; }
     resolved++;
     if (!persist) continue;
 
@@ -315,6 +360,7 @@ export async function ingestSlots(
     deleted,
     resolved,
     unresolved,
+    unresolvedBy,
     slotsUpserted,
     cursor: walk.cursor,
     persist,
@@ -331,6 +377,7 @@ export interface SlotPollSummary {
   deleted: number; // deleted slot items seen (see note in pollSlots)
   resolved: number; // updated slots that mapped to a known London court
   unresolved: number; // updated slots we couldn't place
+  unresolvedBy: UnresolvedBreakdown; // why they didn't resolve (foreign vs real gap)
   slotsUpserted: number; // rows written (0 unless persist)
   transitions: number; // booked/closed → available flips detected
   cursor: string; // head cursor after this poll
@@ -375,6 +422,7 @@ export async function pollSlots(
 ): Promise<SlotPollSummary> {
   const persist = opts.persist ?? false;
   const courtIndex = await loadCourtIndex();
+  const tracked = trackedFacilityIds(courtIndex);
 
   // Resume from the saved head cursor; first run (no cursor) backfills from page 1.
   const [state] = await db
@@ -408,17 +456,19 @@ export async function pollSlots(
   let updated = 0;
   let resolved = 0;
   let unresolved = 0;
+  const unresolvedBy = newBreakdown();
   let slotsUpserted = 0;
   let transitions = 0;
 
   for (const it of latest.values()) {
     updated++;
     const s = parseSlot(it.data ?? {});
-    if (!s) { unresolved++; continue; }
+    if (!s) { unresolved++; unresolvedBy.badData++; continue; }
     const court = courtIndex.get(s.courtExternalId);
+    if (!court) { unresolved++; unresolvedBy[unresolvedReason(s.courtExternalId, tracked)]++; continue; }
     const date = localDate(s.startsAt);
     const time = hourLabel(s.startsAt);
-    if (!court || !time) { unresolved++; continue; }
+    if (!time) { unresolved++; unresolvedBy.noTime++; continue; }
     resolved++;
     byVenue[court.venueSlug] = (byVenue[court.venueSlug] ?? 0) + 1;
 
@@ -471,6 +521,7 @@ export async function pollSlots(
     deleted,
     resolved,
     unresolved,
+    unresolvedBy,
     slotsUpserted,
     transitions,
     cursor: walk.cursor,

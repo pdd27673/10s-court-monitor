@@ -141,13 +141,24 @@ describe("ingestSlots (DB)", () => {
     expect(fs[0].nextCursor).toBe("HEAD-CURSOR");
   });
 
-  it("counts a slot whose court is unknown as unresolved", async () => {
-    await seedVenueAndCourt();
+  it("classifies a slot for an untracked facility as unresolved/foreign", async () => {
+    await seedVenueAndCourt(); // seeds facility 900
+    // facility 999 isn't one we track → benign national-feed noise
     walkState.items = [slotItem({ remainingUses: 1, court: `${BASE}/facility-uses/999/individual-facility-uses/9` })];
     const s = await ingestSlots({ persist: true, paceMs: 0 });
     expect(s.resolved).toBe(0);
     expect(s.unresolved).toBe(1);
+    expect(s.unresolvedBy).toMatchObject({ foreign: 1, unmappedCourt: 0 });
     expect(await testDb().select().from(slots)).toHaveLength(0);
+  });
+
+  it("flags a slot for a TRACKED facility whose court @id isn't seeded as unmappedCourt", async () => {
+    await seedVenueAndCourt(); // seeds facility 900, court .../900/individual-facility-uses/1
+    // same facility 900 (we track it) but court #2 was never seeded → real gap
+    walkState.items = [slotItem({ remainingUses: 1, court: `${BASE}/facility-uses/900/individual-facility-uses/2` })];
+    const s = await ingestSlots({ persist: true, paceMs: 0 });
+    expect(s.resolved).toBe(0);
+    expect(s.unresolvedBy).toMatchObject({ foreign: 0, unmappedCourt: 1 });
   });
 });
 

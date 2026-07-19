@@ -189,6 +189,21 @@ async function runFeedIngest() {
       if (perVenue.length) {
         console.log(`   by venue: ${perVenue.map(([slug, n]) => `${slug}=${n}`).join(", ")}`);
       }
+      // Break down the "unresolved" count so a benign national-feed miss (other
+      // operators/regions we don't seed) reads differently from a real seeding gap.
+      if (c1.unresolved > 0) {
+        const u = c1.unresolvedBy;
+        console.log(
+          `   unresolved ${c1.unresolved}: ${u.foreign} foreign (other operators/regions), ` +
+            `${u.unmappedCourt} tracked-venue court unmapped, ${u.noTime} no-time, ${u.badData} bad-data`
+        );
+        if (u.unmappedCourt > 0) {
+          console.warn(
+            `   ⚠️  ${u.unmappedCourt} slot(s) belonged to a venue we track but had no seeded court — ` +
+              `re-run facility ingest / verify court @ids`
+          );
+        }
+      }
       console.log(`   feed head cursor → ${c1.cursor}`);
       logChanges("Clock 1", c1.changes);
 
