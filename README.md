@@ -1,5 +1,8 @@
 # Tennis Court Notifier
 
+[![CI](https://github.com/pdd27673/10s-court-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/pdd27673/10s-court-monitor/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pdd27673/10s-court-monitor/branch/main/graph/badge.svg)](https://codecov.io/gh/pdd27673/10s-court-monitor)
+
 A notification service that monitors tennis court availability across London venues (Courtside and ClubSpark platforms) and alerts users via Telegram or Email when slots become available.
 
 ## Table of Contents

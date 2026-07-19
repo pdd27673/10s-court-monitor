@@ -7,7 +7,7 @@ export default defineConfig({
     // handlers and one-off scripts are excluded so the number stays meaningful.
     coverage: {
       provider: "v8",
-      reporter: ["text-summary", "text", "json-summary", "html"],
+      reporter: ["text-summary", "text", "json-summary", "html", "lcov"],
       reportsDirectory: "./coverage",
       include: ["src/lib/**/*.ts"],
       exclude: [
