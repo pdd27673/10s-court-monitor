@@ -4,10 +4,9 @@ import { eq } from "drizzle-orm";
 import { VENUES } from "./constants";
 
 /**
- * A booked/closed → available transition, emitted by the ingestion clocks and
+ * A booked/closed → available transition, emitted by the ingestion stages and
  * consumed by `notifyUsers`. The canonical change shape shared across the feed
- * head-poll (Clock 1), the watch-targeted reconcile (Clock 2b), and the daily
- * sweep (Clock 3).
+ * head-poll (Clock 1), confirm-on-notify, and the periodic full sweep.
  */
 export interface SlotChange {
   venue: string;

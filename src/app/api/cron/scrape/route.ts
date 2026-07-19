@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { slots, notificationLog, feedState } from "@/lib/schema";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
-import { reconcileWatchedVenueDays, fullSweep } from "@/lib/ingest/reconcile";
+import { fullSweep, confirmFeedChanges, type ConfirmSummary } from "@/lib/ingest/reconcile";
 import { pollClubSpark } from "@/lib/ingest/clubspark/ingest";
 import type { SlotChange } from "@/lib/differ";
 
@@ -13,9 +13,15 @@ import type { SlotChange } from "@/lib/differ";
 // Facilities change rarely, so this runs far less often than the slot poll.
 const FACILITY_REFRESH_HOURS = parseInt(process.env.FACILITY_REFRESH_HOURS || "6", 10);
 
-// Clock cadences (each throttled independently within one cron tick).
-const RECONCILE_INTERVAL_MIN = parseInt(process.env.RECONCILE_INTERVAL_MIN || "15", 10);
-const SWEEP_INTERVAL_HOURS = parseInt(process.env.SWEEP_INTERVAL_HOURS || "24", 10);
+// Sweep cadence — the single Courtside HTML knob. The sweep is fixed-cost
+// (venues × window venue-days per run, independent of watcher count), so this is
+// a pure latency/bandwidth dial: sweep interval = worst-case false-negative
+// notification latency. Defaults to 2h.
+const SWEEP_INTERVAL_HOURS = parseInt(process.env.SWEEP_INTERVAL_HOURS || "2", 10);
+// Confirm-on-notify: scrape a watched feed flip's venue-day before alerting, to
+// suppress feed false-positives. Degrades safely to direct-notify when the proxy
+// is off (scrape 404s → pass through). Toggle off with CONFIRM_ON_NOTIFY=off.
+const CONFIRM_ON_NOTIFY = !/^(off|false|0)$/i.test(process.env.CONFIRM_ON_NOTIFY ?? "on");
 // ClubSpark (Newham) is a full-snapshot JSON poll, not an RPDE delta feed — one
 // call per venue covers the whole window, so a modest cadence stays polite while
 // beating the retired scraper's ~10-min cron.
@@ -134,19 +140,34 @@ function logErrorRollup(clock: string, errors: { error: string }[]): void {
   console.warn(`   ⚠️  ${clock} errors (${errors.length}): ${rolled}`);
 }
 
+/** One line per confirm-on-notify pass, showing how many watched feed flips were
+ * checked and what the live site said (suppressed false-positives / discovered
+ * false-negatives). Only prints when there was something to confirm. */
+function logConfirm(cf: ConfirmSummary): void {
+  if (cf.toConfirm === 0) return;
+  console.log(
+    `   ✓ confirm-on-notify: ${cf.toConfirm} watched feed flip(s) → scraped ` +
+      `${cf.scrapedVenueDays} venue-day(s); ${cf.suppressed} suppressed (false-positive), ` +
+      `${cf.discovered} discovered (feed miss), ${cf.errors.length} scrape error(s)`
+  );
+  logErrorRollup("confirm-on-notify", cf.errors);
+}
+
 /**
- * Feed-primary ingestion: run the three hybrid clocks in one cron tick. Each
- * clock is failure-isolated so one bad clock never sinks the others; transitions
- * from all clocks are unioned and handed to notifyUsers once (it dedups per
- * channel via notification_log).
- *   Clock 1 — feed head-poll, every tick (cheap at head).
- *   ClubSpark — Newham full-snapshot poll, throttled to CLUBSPARK_INTERVAL_MIN.
- *   Clock 2b — bounded watch-targeted reconcile, throttled to RECONCILE_INTERVAL_MIN.
- *   Clock 3 — daily full sweep, throttled to SWEEP_INTERVAL_HOURS.
+ * Feed-primary ingestion in one cron tick. Each stage is failure-isolated so one
+ * bad stage never sinks the others; transitions from all stages are unioned and
+ * handed to notifyUsers once (it dedups per channel via notification_log).
+ *   Clock 1  — OpenActive feed head-poll, every tick (cheap at head). Instant
+ *              notifications for the ~95% the feed reports correctly.
+ *   confirm  — confirm-on-notify: scrape the venue-day of each watched feed flip
+ *              to drop false-positive alerts (per-transition cost; opt-out flag).
+ *   ClubSpark — Newham first-party snapshot poll, throttled (already truth).
+ *   sweep    — periodic full Courtside re-scrape, throttled to SWEEP_INTERVAL_HOURS.
+ *              Fixed-cost false-negative discovery + dashboard-correctness net.
  */
 async function runFeedIngest() {
   try {
-    console.log("Starting feed-primary ingest (Clock 1 / 2b / 3)...");
+    console.log("Starting feed-primary ingest (feed → confirm → clubspark → sweep)...");
     await ensureVenuesExist();
     // Keep venues/courts/geo fresh (throttled, failure-isolated). Also the
     // prereq that populates `courts` so slot→court resolution works.
@@ -170,7 +191,17 @@ async function runFeedIngest() {
       }
       console.log(`   feed head cursor → ${c1.cursor}`);
       logChanges("Clock 1", c1.changes);
-      allChanges.push(...c1.changes);
+
+      // Confirm-on-notify: verify watched feed flips against the live site before
+      // alerting (drops false-positives; the site-wins upsert also corrects the
+      // dashboard). Fails safe to direct-notify when the proxy is off.
+      if (CONFIRM_ON_NOTIFY && c1.changes.length > 0) {
+        const cf = await confirmFeedChanges(c1.changes, { persist: true });
+        logConfirm(cf);
+        allChanges.push(...cf.changes);
+      } else {
+        allChanges.push(...c1.changes);
+      }
     } catch (error) {
       console.error("Clock 1 head-poll failed (non-fatal):", error);
     }
@@ -194,38 +225,22 @@ async function runFeedIngest() {
       }
     }
 
-    // Clock 2b — bounded watch-targeted reconcile (site wins), throttled.
-    if (await clockDue("reconcile", RECONCILE_INTERVAL_MIN * 60_000)) {
-      try {
-        const c2 = await reconcileWatchedVenueDays({ persist: true });
-        console.log(
-          `Clock 2b reconcile: scraped ${c2.scrapedVenueDays}/${c2.pendingVenueDays} pending ` +
-            `venue-days (budget ${c2.maxPages}), ${c2.slotsScraped} slots, ${c2.upserted} upserted, ` +
-            `${c2.transitions} transitions, ${c2.errors.length} errors`
-        );
-        logErrorRollup("Clock 2b", c2.errors);
-        logChanges("Clock 2b", c2.changes);
-        allChanges.push(...c2.changes);
-        await stampClock("reconcile");
-      } catch (error) {
-        console.error("Clock 2b reconcile failed (non-fatal):", error);
-      }
-    }
-
-    // Clock 3 — daily full sweep (dashboard floor + feed-drop net), throttled.
+    // Periodic full sweep — fixed-cost false-negative discovery + dashboard floor,
+    // throttled to SWEEP_INTERVAL_HOURS. Site-wins across every Courtside
+    // venue-day; the only mechanism that catches slots the feed wrongly hides.
     if (await clockDue("sweep", SWEEP_INTERVAL_HOURS * 3600_000)) {
       try {
-        const c3 = await fullSweep({ persist: true });
+        const sweep = await fullSweep({ persist: true });
         console.log(
-          `Clock 3 sweep: ${c3.venueDays} venue-days, ${c3.slotsScraped} slots, ${c3.upserted} upserted, ` +
-            `${c3.transitions} transitions, ${c3.errors.length} errors`
+          `Full sweep: ${sweep.venueDays} venue-days, ${sweep.slotsScraped} slots, ` +
+            `${sweep.upserted} upserted, ${sweep.transitions} transitions, ${sweep.errors.length} errors`
         );
-        logErrorRollup("Clock 3", c3.errors);
-        logChanges("Clock 3", c3.changes);
-        allChanges.push(...c3.changes);
+        logErrorRollup("sweep", sweep.errors);
+        logChanges("sweep", sweep.changes);
+        allChanges.push(...sweep.changes);
         await stampClock("sweep");
       } catch (error) {
-        console.error("Clock 3 sweep failed (non-fatal):", error);
+        console.error("Full sweep failed (non-fatal):", error);
       }
     }
 

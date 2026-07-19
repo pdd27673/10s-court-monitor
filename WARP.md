@@ -49,7 +49,7 @@ curl "http://localhost:3000/api/availability?venue=victoria-park&date=2025-01-21
 ### Tech Stack
 - **Frontend/Backend**: Next.js 16 (App Router, React 19)
 - **Database**: Railway Postgres with Drizzle ORM (node-postgres)
-- **Ingestion**: OpenActive RPDE feed (primary) + Cheerio HTML scrape (reconcile backstop)
+- **Ingestion**: OpenActive RPDE feed (primary) + Cheerio HTML scrape (full sweep + confirm-on-notify backstop)
 - **Notifications**: Telegram Bot API, Gmail via Nodemailer
 - **Deployment**: Railway (recommended)
 
@@ -57,13 +57,21 @@ curl "http://localhost:3000/api/availability?venue=victoria-park&date=2025-01-21
 
 **Feed-primary ingestion** (`src/lib/ingest/`)
 - Clock 1 (`ingest/openactive/ingest.ts` `pollSlots`): applies OpenActive RPDE
-  deltas to `slots` — no HTML
-- Clock 2 (`ingest/reconcile.ts` `reconcileWatchedVenueDays`): bounded round-robin
-  scrape of watched-but-taken venue-days; site wins on any feed/site disagreement
-- Clock 3 (`ingest/reconcile.ts` `fullSweep`): daily scrape of every active
-  Courtside venue-day (dashboard floor + feed-drop net)
+  deltas to `slots` — no HTML. Instant notifications for the ~95% the feed reports
+  correctly.
+- Confirm-on-notify (`ingest/reconcile.ts` `confirmFeedChanges`): scrapes only the
+  venue-days of *watched* feed flips to suppress false-positive alerts (site wins);
+  per-transition cost. Fails safe to direct-notify when the proxy is off.
+- Full sweep (`ingest/reconcile.ts` `fullSweep`): periodic scrape of every active
+  Courtside venue-day, throttled to `SWEEP_INTERVAL_HOURS` (default 2). The only
+  false-negative discovery mechanism + dashboard-correctness net; FIXED cost,
+  independent of watcher count.
+- Retired from the live tick (kept as read-only diagnostics + `scripts/reconcile-*`):
+  the watch-targeted `reconcileWatchedVenueDays` clock and its `computePendingSet`
+  planner — its bandwidth scaled with watch demand, which the fixed-cost sweep
+  now covers.
 - Scrapers (`src/lib/scrapers/courtside.ts`) return structured slot data
-  (venue, date, time, court, status, price) for Clocks 2/3
+  (venue, date, time, court, status, price) for the sweep and confirm-on-notify
 
 **Change Detection** (`src/lib/differ.ts`)
 - Compares scraped slots against database state

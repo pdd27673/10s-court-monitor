@@ -6,15 +6,18 @@ import { eq } from "drizzle-orm";
 import { ensureVenuesExist } from "@/lib/differ";
 import { notifyUsers } from "@/lib/notifiers";
 import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
-import { fullSweep } from "@/lib/ingest/reconcile";
+import { fullSweep, confirmFeedChanges } from "@/lib/ingest/reconcile";
 import { pollClubSpark } from "@/lib/ingest/clubspark/ingest";
 import type { SlotChange } from "@/lib/differ";
 
+const CONFIRM_ON_NOTIFY = !/^(off|false|0)$/i.test(process.env.CONFIRM_ON_NOTIFY ?? "on");
+
 /**
  * Admin "refresh now" trigger. Runs the feed-primary ingestion on demand,
- * unthrottled: refresh venues/courts from the facility feed, delta-poll the
- * slots feed (Clock 1), then a full sweep (Clock 3) as the correctness floor.
- * Transitions from both are unioned into one notifyUsers call.
+ * unthrottled: refresh venues/courts from the facility feed, delta-poll the slots
+ * feed (Clock 1) and confirm watched flips against the live site, poll ClubSpark,
+ * then a full sweep as the correctness floor. Transitions are unioned into one
+ * notifyUsers call.
  */
 export async function POST() {
   try {
@@ -38,7 +41,12 @@ export async function POST() {
 
         const changes: SlotChange[] = [];
         const poll = await pollSlots({ persist: true });
-        changes.push(...poll.changes);
+        if (CONFIRM_ON_NOTIFY && poll.changes.length > 0) {
+          const cf = await confirmFeedChanges(poll.changes, { persist: true });
+          changes.push(...cf.changes);
+        } else {
+          changes.push(...poll.changes);
+        }
         const clubspark = await pollClubSpark({ persist: true });
         changes.push(...clubspark.changes);
         const sweep = await fullSweep({ persist: true });

@@ -12,12 +12,29 @@ import {
   computePendingSet,
   reconcileWatchedVenueDays,
   fullSweep,
+  confirmFeedChanges,
+  activeWatchCandidates,
   nextDates,
 } from "./reconcile";
+import type { SlotChange } from "../differ";
 import { venues, courts, users, watches, slots, feedState } from "../schema";
 import { and, eq } from "drizzle-orm";
 
 const scrape = vi.mocked(scrapeCourtside);
+
+/** A feed booked→available transition for the confirm-on-notify tests. */
+function feedFlip(over: Partial<SlotChange> = {}): SlotChange {
+  return {
+    venue: "victoria-park",
+    venueName: "victoria-park",
+    date: TODAY,
+    time: "7pm",
+    court: "Court 1",
+    oldStatus: "booked",
+    newStatus: "available",
+    ...over,
+  };
+}
 
 // ---- seed helpers ----
 const [TODAY, TOMORROW] = nextDates(2);
@@ -252,5 +269,113 @@ describe("fullSweep (DB)", () => {
     expect(r.upserted).toBe(0);
     const rows = await slotRows(v, TODAY, "7pm");
     expect(rows[0].status).toBe("booked");
+  });
+});
+
+describe("activeWatchCandidates (DB)", () => {
+  it("collects watched (venue,date,time) keys and fans an all-venues watch to active venues", async () => {
+    const vp = await addVenue("victoria-park", { active: 1 });
+    await addVenue("st-johns-park", { active: 0 }); // closed → excluded
+    await addWatch(vp, ["7pm"]);
+    await addWatch(null, ["9am"]); // all active venues
+
+    const cand = await activeWatchCandidates({ windowDays: 1 });
+    expect(cand.has(`victoria-park|${TODAY}|7pm`)).toBe(true);
+    expect(cand.has(`victoria-park|${TODAY}|9am`)).toBe(true); // via the all-venues watch
+    expect([...cand].some((k) => k.startsWith("st-johns-park"))).toBe(false);
+  });
+});
+
+describe("confirmFeedChanges (DB) — confirm-on-notify", () => {
+  it("suppresses a false-positive flip the live site contradicts", async () => {
+    const v = await addVenue("victoria-park");
+    await addCourt(v, "ext-1", "Court 1");
+    await addWatch(v, ["7pm"]);
+    // Feed said 7pm went available; the site says it's actually still booked.
+    scrape.mockResolvedValue([
+      { venue: "victoria-park", date: TODAY, time: "7pm", court: "Tennis court 1", status: "booked" },
+    ]);
+
+    const cf = await confirmFeedChanges([feedFlip()], { persist: true, windowDays: 1 });
+
+    expect(cf.toConfirm).toBe(1);
+    expect(cf.scrapedVenueDays).toBe(1);
+    expect(cf.suppressed).toBe(1);
+    expect(cf.changes).toHaveLength(0); // alert dropped
+    expect(scrape).toHaveBeenCalledWith("victoria-park", TODAY);
+  });
+
+  it("keeps a flip the live site confirms available", async () => {
+    const v = await addVenue("victoria-park");
+    await addCourt(v, "ext-1", "Court 1");
+    await addWatch(v, ["7pm"]);
+    scrape.mockResolvedValue([
+      { venue: "victoria-park", date: TODAY, time: "7pm", court: "Tennis court 1", status: "available" },
+    ]);
+
+    const cf = await confirmFeedChanges([feedFlip()], { persist: true, windowDays: 1 });
+
+    expect(cf.suppressed).toBe(0);
+    expect(cf.changes).toHaveLength(1);
+    expect(cf.changes[0]).toMatchObject({ venue: "victoria-park", time: "7pm" });
+  });
+
+  it("passes a flip through unconfirmed when the scrape fails (proxy-off safety)", async () => {
+    const v = await addVenue("victoria-park");
+    await addCourt(v, "ext-1", "Court 1");
+    await addWatch(v, ["7pm"]);
+    scrape.mockRejectedValue(new Error("IP blocked (404)"));
+
+    const cf = await confirmFeedChanges([feedFlip()], { persist: true, windowDays: 1 });
+
+    expect(cf.errors).toHaveLength(1);
+    expect(cf.suppressed).toBe(0); // never drop what we couldn't confirm
+    expect(cf.changes).toHaveLength(1);
+  });
+
+  it("does not scrape unwatched feed flips (passes them straight through)", async () => {
+    await addVenue("victoria-park");
+    // no watch at 7pm → nothing to confirm
+    const cf = await confirmFeedChanges([feedFlip()], { persist: true, windowDays: 1 });
+
+    expect(cf.toConfirm).toBe(0);
+    expect(cf.scrapedVenueDays).toBe(0);
+    expect(cf.changes).toHaveLength(1); // unchanged
+    expect(scrape).not.toHaveBeenCalled();
+  });
+
+  it("does not scrape non-Courtside (ClubSpark) feed flips", async () => {
+    const v = await addVenue("newham-clubspark", { sourceType: "clubspark" });
+    await addWatch(v, ["7pm"]);
+    const cf = await confirmFeedChanges([feedFlip({ venue: "newham-clubspark", venueName: "newham-clubspark" })], {
+      persist: true,
+      windowDays: 1,
+    });
+
+    expect(cf.toConfirm).toBe(0);
+    expect(scrape).not.toHaveBeenCalled();
+    expect(cf.changes).toHaveLength(1);
+  });
+
+  it("folds in a false-negative the confirm scrape discovers on the same venue-day", async () => {
+    const v = await addVenue("victoria-park");
+    const c1 = await addCourt(v, "ext-1", "Court 1");
+    const c2 = await addCourt(v, "ext-2", "Court 2");
+    await addWatch(v, ["7pm"]);
+    // DB shows Court 2 @ 8pm still booked (a feed false-negative).
+    await addSlot(v, TODAY, "8pm", "Court 2", "booked", c2);
+    // Site confirms the watched 7pm flip AND reveals 8pm is actually free.
+    scrape.mockResolvedValue([
+      { venue: "victoria-park", date: TODAY, time: "7pm", court: "Tennis court 1", status: "available" },
+      { venue: "victoria-park", date: TODAY, time: "8pm", court: "Tennis court 2", status: "available" },
+    ]);
+
+    const cf = await confirmFeedChanges([feedFlip()], { persist: true, windowDays: 1 });
+
+    expect(cf.suppressed).toBe(0);
+    expect(cf.discovered).toBe(1);
+    // both the confirmed 7pm flip and the discovered 8pm slot are notify-safe
+    expect(cf.changes.map((c) => c.time).sort()).toEqual(["7pm", "8pm"]);
+    void c1;
   });
 });

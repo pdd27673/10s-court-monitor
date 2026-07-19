@@ -1,26 +1,27 @@
 /**
- * Clock 2 — watch-targeted reconcile (planning half).
+ * Courtside HTML cross-check — the site-truth half of the hybrid ingestion.
  *
  * The OpenActive feed hides ~5% of genuinely-bookable court-hours because the
  * operator doesn't reliably re-emit a slot when a booking is cancelled (see
- * `scripts/feed-vs-site-audit.ts` and docs/REARCHITECTURE-PLAN.md). The feed
- * cannot detect its own staleness, so the only fix is to cross-check against the
- * live booking site — but scraping every venue-day defeats the point of the feed.
+ * `scripts/feed-vs-site-audit.ts` and docs/REARCHITECTURE-PLAN.md), in BOTH
+ * directions: false-positives (feed says available, site says booked) and
+ * false-negatives (feed says booked, site says available). The feed can't detect
+ * its own staleness, so the only fix is to cross-check against the live site — but
+ * scraping every venue-day every tick defeats the point of the feed.
  *
- * This module computes the *pending set*: the minimal list of venue-days worth
- * scraping, being exactly those where some user is watching a (venue, date, time)
- * that our DB currently shows as NOT available. Those are the only places a
- * stale-feed false-negative could cost a missed notification. Everything else the
- * feed already covers, so we don't scrape it.
+ * Two mechanisms consume the shared scrape/site-wins core below:
  *
- * `computePendingSet` is read-only — it decides WHAT to reconcile and reports the
- * HTML budget. `reconcileWatchedVenueDays` (below) is the acting half: it scrapes
- * a BOUNDED, round-robin subset of the pending venue-days, writes the site's truth
- * into the feed-owned `slots` table with canonical court labels ("site wins"), and
- * returns the booked/closed→available transitions to notify on. `persist` defaults
- * FALSE (same cutover gate as `pollSlots`), so it belongs with the Phase 3 cutover.
- * Run `scripts/reconcile-preview.ts` to size the budget and
- * `scripts/reconcile-run-preview.ts` to preview an actual (read-only) run.
+ *   • `fullSweep` — the periodic full re-scrape (the workhorse). The ONLY thing
+ *     that discovers false-negatives, at FIXED cost independent of watcher count.
+ *   • `confirmFeedChanges` — confirm-on-notify. Scrapes just the venue-days of
+ *     *watched* feed flips to suppress false-positive notifications, at
+ *     per-transition cost.
+ *
+ * The watch-targeted `reconcileWatchedVenueDays` clock (and its `computePendingSet`
+ * planner / `selectReconcileTargets` round-robin) is RETIRED from the live tick —
+ * its bandwidth scaled with watched-taken venue-days, which the fixed-cost sweep
+ * now covers. It is retained here (and in `scripts/reconcile-*.ts`) as a read-only
+ * diagnostic. `persist` defaults FALSE on every writer (the Phase 3 cutover gate).
  */
 import { db } from "../db";
 import { slots, venues, watches, courts, feedState } from "../schema";
@@ -69,6 +70,57 @@ export function nextDates(n: number, from = new Date()): string[] {
   return out;
 }
 
+/** The watch fields that determine which (venue,date,time) it would notify on. */
+interface WatchTimes {
+  venueId: number | null;
+  dayTimes: string | null;
+  weekdayTimes: string | null;
+  weekendTimes: string | null;
+}
+
+/**
+ * The set of "<slug>|<date>|<time>" (time lowercased/trimmed) that some active
+ * watch would notify on across `dates`. Pure — the single definition of "watched
+ * (venue,date,time)" shared by the pending-set planner and confirm-on-notify, so
+ * the two never drift. An all-venues watch (venueId null) fans out to
+ * `activeVenueSlugs`.
+ */
+export function buildWatchCandidates(
+  activeWatches: WatchTimes[],
+  activeVenueSlugs: string[],
+  slugById: Map<number, string>,
+  dates: string[]
+): Set<string> {
+  const candidates = new Set<string>();
+  for (const w of activeWatches) {
+    const venuesForWatch =
+      w.venueId == null ? activeVenueSlugs : ([slugById.get(w.venueId)].filter(Boolean) as string[]);
+    for (const date of dates) {
+      const dayName = DAY_NAMES[new Date(date).getDay()];
+      const times = watchPreferredTimes(w, dayName);
+      for (const slug of venuesForWatch) {
+        for (const time of times) {
+          candidates.add(`${slug}|${date}|${time.toLowerCase().trim()}`);
+        }
+      }
+    }
+  }
+  return candidates;
+}
+
+/** DB-backed `buildWatchCandidates` over the next `windowDays` (defaults to
+ * SCRAPE_DAYS). Used by confirm-on-notify to decide whether a feed flip is worth
+ * a confirmation scrape. */
+export async function activeWatchCandidates(opts: { windowDays?: number } = {}): Promise<Set<string>> {
+  const windowDays = opts.windowDays ?? parseInt(process.env.SCRAPE_DAYS || "8", 10);
+  const dates = nextDates(windowDays);
+  const activeWatches = await db.query.watches.findMany({ where: eq(watches.active, 1) });
+  const allVenues = await db.select({ id: venues.id, slug: venues.slug, active: venues.active }).from(venues);
+  const slugById = new Map(allVenues.map((v) => [v.id, v.slug]));
+  const activeVenueSlugs = allVenues.filter((v) => v.active !== 0).map((v) => v.slug);
+  return buildWatchCandidates(activeWatches, activeVenueSlugs, slugById, dates);
+}
+
 export interface PendingVenueDay {
   venueSlug: string;
   date: string;
@@ -106,19 +158,7 @@ export async function computePendingSet(opts: { windowDays?: number } = {}): Pro
   const activeVenueSlugs = allVenues.filter((v) => v.active !== 0).map((v) => v.slug);
 
   // 1. Candidate (venueSlug, date, time) set from watches × window.
-  const candidates = new Set<string>();
-  for (const w of activeWatches) {
-    const venuesForWatch = w.venueId == null ? activeVenueSlugs : [slugById.get(w.venueId)].filter(Boolean) as string[];
-    for (const date of dates) {
-      const dayName = DAY_NAMES[new Date(date).getDay()];
-      const times = watchPreferredTimes(w, dayName);
-      for (const slug of venuesForWatch) {
-        for (const time of times) {
-          candidates.add(`${slug}|${date}|${time.toLowerCase().trim()}`);
-        }
-      }
-    }
-  }
+  const candidates = buildWatchCandidates(activeWatches, activeVenueSlugs, slugById, dates);
 
   // 2. Current availability for the candidate venue-days: a (venue,date,time) is
   //    "available" if ANY court there is available in the DB.
@@ -167,7 +207,9 @@ export async function computePendingSet(opts: { windowDays?: number } = {}): Pro
 }
 
 // ============================================================================
-// Clock 2b — site-wins reconcile: fetch → upsert → notify (bounded round-robin)
+// Watch-targeted reconcile — RETIRED from the live tick (see module header).
+// Kept as a read-only diagnostic + `scripts/reconcile-*.ts`. Site-wins reconcile:
+// fetch → upsert → notify (bounded round-robin).
 // ============================================================================
 
 /** `feed_state.source` namespace for the reconcile round-robin cursors. One row
@@ -331,6 +373,10 @@ interface ReconcileRun {
   transitions: number;
   errors: { venueSlug: string; date: string; error: string }[];
   changes: SlotChange[];
+  /** "<slug>|<date>|<time>" (time lowercased/trimmed) the SITE showed available
+   * this run — regardless of court. Lets confirm-on-notify verify a feed flip
+   * against live truth without a second read. */
+  availableSet: Set<string>;
 }
 
 /**
@@ -348,6 +394,7 @@ async function scrapeAndReconcileVenueDays(
 ): Promise<ReconcileRun> {
   const changes: SlotChange[] = [];
   const errors: { venueSlug: string; date: string; error: string }[] = [];
+  const availableSet = new Set<string>();
   let slotsScraped = 0;
   let upserted = 0;
   let transitions = 0;
@@ -370,6 +417,13 @@ async function scrapeAndReconcileVenueDays(
     slotsScraped += scraped.length;
 
     for (const s of scraped) {
+      // Record live availability at the (venue,date,time) level before the court
+      // canonicalisation — an unmappable court label is still a real free court
+      // for notification purposes (watches match on time, not court).
+      if (s.status === "available") {
+        availableSet.add(`${vd.venueSlug}|${s.date}|${s.time.toLowerCase().trim()}`);
+      }
+
       const canon = canonicalCourtLabel(s.court, venue.courts);
       if (!canon) continue;
 
@@ -406,7 +460,7 @@ async function scrapeAndReconcileVenueDays(
     if (persist) await markReconciled(vd.venueSlug, vd.date);
   }
 
-  return { slotsScraped, upserted, transitions, errors, changes };
+  return { slotsScraped, upserted, transitions, errors, changes, availableSet };
 }
 
 export interface ReconcileSummary {
@@ -427,8 +481,9 @@ export interface ReconcileSummary {
 }
 
 /**
- * Clock 2b of the hybrid ingestion — the correctness backstop for the feed's ~5%
- * stale misses (see docs/REARCHITECTURE-PLAN.md → "Feed reliability"). It:
+ * RETIRED from the live tick (the fixed-cost `fullSweep` now covers this); kept as
+ * a read-only diagnostic. Was the watch-targeted correctness backstop for the
+ * feed's ~5% stale misses (see docs/REARCHITECTURE-PLAN.md → "Feed reliability"). It:
  *
  *   1. asks `computePendingSet()` which watched venue-days currently show no
  *      available court (the only places a stale-feed false-negative can cost a
@@ -496,17 +551,23 @@ export interface SweepSummary {
 }
 
 /**
- * Clock 3 of the hybrid ingestion — the daily full sweep. Scrapes EVERY active
- * Courtside venue-day across the window (not just watched-pending ones), site-wins
- * upserts, and returns transitions for `notifyUsers`. It is the dashboard
- * correctness floor and the feed-drop safety net: it catches stale-feed misses on
- * unwatched slots (no notification owed, but the dashboard should be right) and,
- * by stamping each venue-day's reconcile cursor, re-baselines Clock 2 so the
- * bounded reconcile doesn't redundantly re-scrape what the sweep just checked.
+ * The periodic full sweep — the workhorse of the post-reconcile design. Scrapes
+ * EVERY active Courtside venue-day across the window (not just watched-pending
+ * ones), site-wins upserts, and returns transitions for `notifyUsers`.
  *
- * `persist` defaults FALSE (same cutover gate as the other clocks). At the default
- * 8-day window and the 7 Tower Hamlets venues that's ~56 venue-days/run, meant to
- * run once per 24h — the cheapest of the three clocks.
+ * It is the ONLY false-negative discovery mechanism: the feed can't announce a
+ * slot it wrongly shows as booked, and confirm-on-notify only fires on feed
+ * transitions, so a slot the feed hides (booked in the feed, free on the site)
+ * has no event to trigger a targeted check — only a blind re-scrape of
+ * apparently-booked slots finds it. The sweep is bidirectional: it also corrects
+ * feed false-positives on the dashboard (available→booked).
+ *
+ * Its cost is FIXED at (Courtside venues × window) venue-days per run, INDEPENDENT
+ * of watcher count — at the default 8-day window and 7 Tower Hamlets venues that's
+ * ~56 venue-days/run. The single knob is `SWEEP_INTERVAL_HOURS`: sweep interval =
+ * worst-case false-negative notification latency, traded against fixed bandwidth.
+ *
+ * `persist` defaults FALSE (same cutover gate as the other writers).
  */
 export async function fullSweep(
   opts: { persist?: boolean; windowDays?: number } = {}
@@ -527,6 +588,144 @@ export async function fullSweep(
     windowDays,
     venueDays: targets.length,
     ...run,
+    persist,
+  };
+}
+
+// ============================================================================
+// Confirm-on-notify — verify a watched feed flip against the live site before
+// firing the notification (suppresses feed false-positives at per-transition cost)
+// ============================================================================
+
+/** How many distinct venue-days a single confirm pass may scrape. A safety valve
+ * against a feed dump flipping many watched venue-days available in one tick;
+ * over-cap transitions pass through unconfirmed rather than being dropped. */
+const CONFIRM_MAX_VENUE_DAYS = parseInt(process.env.CONFIRM_MAX_VENUE_DAYS || "20", 10);
+
+const confirmTimeKey = (venue: string, date: string, time: string) =>
+  `${venue}|${date}|${time.toLowerCase().trim()}`;
+const confirmFullKey = (c: SlotChange) =>
+  `${c.venue}|${c.date}|${c.time.toLowerCase().trim()}|${c.court}`;
+
+export interface ConfirmSummary {
+  /** feed transitions handed in. */
+  input: number;
+  /** of those, the watched Courtside subset eligible for a confirmation scrape. */
+  toConfirm: number;
+  /** distinct venue-days actually scraped to confirm (≤ maxVenueDays). */
+  scrapedVenueDays: number;
+  /** watched feed transitions the live site contradicted (false positives, dropped). */
+  suppressed: number;
+  /** bonus booked/closed→available transitions the confirm scrape discovered on
+   * those venue-days (feed false-negatives), folded into `changes`. */
+  discovered: number;
+  /** the notify-safe transition list: every input change except suppressed
+   * false-positives, plus deduped discoveries. Hand this to `notifyUsers`. */
+  changes: SlotChange[];
+  errors: { venueSlug: string; date: string; error: string }[];
+  persist: boolean;
+}
+
+/**
+ * Confirm-on-notify. Given the feed (Clock 1) booked/closed→available transitions,
+ * scrape the live site for the venue-days of the *watched, Courtside* ones and
+ * return only the transitions worth notifying on.
+ *
+ * The feed hides ~5% of truth in BOTH directions. This closes the false-POSITIVE
+ * direction for notifications: when the feed says a watched slot went available
+ * but the site says it's actually booked, we drop the alert (and the site-wins
+ * upsert corrects the dashboard). The complementary false-NEGATIVE direction — the
+ * feed still showing a free slot as booked — has no feed event to trigger a check
+ * and is the job of the periodic `fullSweep`, not this function.
+ *
+ * Only *watched* + *Courtside* feed flips are scraped: unwatched ones notify
+ * nobody, and non-Courtside (ClubSpark) is already first-party truth. Cost is
+ * therefore per real watched transition, not per watcher.
+ *
+ * Fails SAFE: a venue-day whose scrape errors (e.g. the residential proxy is off
+ * and Courtside 404s from a datacenter IP) or that falls over `maxVenueDays`
+ * cannot be confirmed, so its transitions pass through unsuppressed rather than
+ * being wrongly dropped. With the proxy off this degrades to today's behaviour
+ * (feed flips notify directly).
+ *
+ * `persist` mirrors the caller (site-wins upsert of the scraped venue-days).
+ */
+export async function confirmFeedChanges(
+  feedChanges: SlotChange[],
+  opts: { persist?: boolean; windowDays?: number; maxVenueDays?: number } = {}
+): Promise<ConfirmSummary> {
+  const persist = opts.persist ?? false;
+  const maxVenueDays = opts.maxVenueDays ?? CONFIRM_MAX_VENUE_DAYS;
+
+  const passthrough = (extra: Partial<ConfirmSummary> = {}): ConfirmSummary => ({
+    input: feedChanges.length,
+    toConfirm: 0,
+    scrapedVenueDays: 0,
+    suppressed: 0,
+    discovered: 0,
+    changes: feedChanges,
+    errors: [],
+    persist,
+    ...extra,
+  });
+
+  if (feedChanges.length === 0) return passthrough();
+
+  const venueIndex = await loadCourtsideVenueIndex();
+  const candidates = await activeWatchCandidates({ windowDays: opts.windowDays });
+
+  const toConfirm = feedChanges.filter(
+    (c) => venueIndex.has(c.venue) && candidates.has(confirmTimeKey(c.venue, c.date, c.time))
+  );
+  if (toConfirm.length === 0) return passthrough();
+
+  // One scrape per distinct venue-day, capped. Preserve first-seen order so the
+  // cap keeps the earliest-reported flips.
+  const vdOrder: string[] = [];
+  const vdSeen = new Set<string>();
+  for (const c of toConfirm) {
+    const vd = `${c.venue}|${c.date}`;
+    if (!vdSeen.has(vd)) {
+      vdSeen.add(vd);
+      vdOrder.push(vd);
+    }
+  }
+  const targets = vdOrder.slice(0, Math.max(0, maxVenueDays)).map((vd) => {
+    const [venueSlug, date] = vd.split("|");
+    return { venueSlug, date };
+  });
+  const scrapedVD = new Set(targets.map((t) => `${t.venueSlug}|${t.date}`));
+
+  const run = await scrapeAndReconcileVenueDays(targets, venueIndex, persist);
+  const failedVD = new Set(run.errors.map((e) => `${e.venueSlug}|${e.date}`));
+
+  // Suppress a watched flip ONLY when its venue-day scraped successfully AND the
+  // site shows that (venue,date,time) with no available court. Un-scraped
+  // (over-cap) or failed venue-days can't confirm → never suppress.
+  const suppressedTimes = new Set<string>();
+  for (const c of toConfirm) {
+    const vd = `${c.venue}|${c.date}`;
+    if (!scrapedVD.has(vd) || failedVD.has(vd)) continue;
+    const tk = confirmTimeKey(c.venue, c.date, c.time);
+    if (!run.availableSet.has(tk)) suppressedTimes.add(tk);
+  }
+
+  const kept = feedChanges.filter((c) => !suppressedTimes.has(confirmTimeKey(c.venue, c.date, c.time)));
+  const suppressed = feedChanges.length - kept.length;
+
+  // Fold in false-negatives the scrape caught on those venue-days, deduped
+  // against kept transitions by full slot key so notifyUsers doesn't double-fire.
+  const keptKeys = new Set(kept.map(confirmFullKey));
+  const discovered = run.changes.filter((c) => !keptKeys.has(confirmFullKey(c)));
+
+  return {
+    input: feedChanges.length,
+    toConfirm: toConfirm.length,
+    scrapedVenueDays: targets.length,
+    suppressed,
+    discovered: discovered.length,
+    changes: [...kept, ...discovered],
+    errors: run.errors,
     persist,
   };
 }
