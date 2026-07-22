@@ -1,0 +1,13 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "//": "Config for the SECOND Railway service (Phase 5): the ingestion worker. Point the worker service's config-as-code path at this file. Shares the repo + DATABASE_URL with the web service; runs no HTTP server (no healthcheck) and does NOT run db:migrate (the web service owns migrations — two services racing migrations is a hazard). startCommand execs tsx directly so SIGTERM reaches the Node process for a graceful drain — `npm run worker` would NOT forward the signal and Railway would SIGKILL mid-tick.",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "echo 'worker: no build step (runs source via tsx)'"
+  },
+  "deploy": {
+    "startCommand": "exec ./node_modules/.bin/tsx src/lib/ingest/worker.ts",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  }
+}
