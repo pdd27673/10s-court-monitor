@@ -77,8 +77,8 @@ DB rows to verify transitions.
 # ADMIN_EMAIL for admin alerts
 ```
 
-**Proxy (Webshare)** — only the Courtside HTML reconcile fetcher (Clock 2b/3) can
-use it; the OpenActive feed (Clock 1) and ClubSpark (Newham) are always direct.
+**Proxy (Webshare)** — only the Courtside HTML fetcher (confirm-on-notify + the full
+sweep) can use it; the OpenActive feed (Clock 1) and ClubSpark (Newham) are always direct.
 Leave **unset** to go direct and confirm the block/timeout rate is acceptable on
 staging; set the four vars only if direct fetch gets 403/timeouts.
 
@@ -94,10 +94,14 @@ verification run cheaper/faster if you like:
 | `SCRAPE_DAYS` | 8 | window (days) all clocks cover |
 | `FACILITY_REFRESH_HOURS` | 6 | venue/court metadata refresh cadence |
 | `CLUBSPARK_INTERVAL_MIN` | 5 | Newham JSON poll cadence |
-| `RECONCILE_INTERVAL_MIN` | 15 | Clock 2b cadence (= notify-miss SLA) |
-| `RECONCILE_MAX_PAGES` | 40 | Clock 2b HTML budget/run |
-| `SWEEP_INTERVAL_HOURS` | 24 | Clock 3 daily full sweep |
+| `CONFIRM_ON_NOTIFY` | on | confirm watched feed flips against the live site before alerting (drops false-positives); `off`/`false`/`0` to disable |
+| `CONFIRM_MAX_VENUE_DAYS` | (code default) | cap on venue-days scraped per confirm pass |
+| `SWEEP_INTERVAL_HOURS` | 2 | full Courtside sweep = worst-case false-negative notify latency |
 | `CLEANUP_DAYS` | 7 | slot/log retention |
+
+> The retired watch-targeted reconcile is **not** on the tick — `RECONCILE_INTERVAL_MIN`
+> is no longer read, and `RECONCILE_MAX_PAGES` (default 40) only affects the read-only
+> `scripts/reconcile-*.ts` diagnostics. Don't set them expecting cron behaviour.
 
 ## 4. Deploy
 
@@ -130,13 +134,17 @@ What the first tick does, in order (`runFeedIngest`):
    resolution**, runs first.
 3. **Clock 1** `pollSlots` — first run has no cursor → full backfill from page 1
    (~88 pages, ~1.6 MB, ~35s at the 0.4s/page pace). All prior statuses null →
-   **0 transitions**.
+   **0 transitions** → confirm-on-notify has nothing to confirm.
 4. **ClubSpark** `pollClubSpark` — Newham full-snapshot → seeds `slots` + creates
    Newham `courts` by name. Backfill → **0 transitions**.
-5. **Clock 3** `fullSweep` — Courtside HTML sweep, site-wins, baselines Clock 2.
+5. **Clock 3** `fullSweep` — Courtside HTML sweep, site-wins upsert across every
+   active venue-day. On a fresh DB this just fills in the site view.
 6. `runCleanup` — retention + `VACUUM`.
 
 Because everything is a first-seen backfill, **no notifications fire** on this tick.
+(On a fresh staging DB the HTML scrape in steps 5/confirm only runs if the proxy is
+configured or Courtside serves your datacenter IP; otherwise it 404s and fails safe —
+the feed backfill still populates availability.)
 
 ## 6. Verify
 
@@ -155,7 +163,7 @@ railway run --environment staging psql "$DATABASE_URL" -c "
 - Hit `/api/availability` and `/api/venues` → Newham (ClubSpark) courts now appear
   alongside Tower Hamlets.
 - **Second tick** should be cheap: Clock 1 resumes at the head (near-empty delta),
-  ClubSpark re-polls, sweep/reconcile respect their throttles.
+  ClubSpark re-polls, the sweep respects its throttle.
 - **Notification smoke:** with a watch on a currently-taken slot, book→cancel a real
   court (or wait for a genuine flip); confirm a transition is logged and (if creds
   set) a Telegram/email fires within the clock interval.
@@ -165,7 +173,7 @@ railway run --environment staging psql "$DATABASE_URL" -c "
 ```bash
 npx tsx scripts/poll-slots-preview.ts        # Clock 1 (needs courts populated)
 npx tsx scripts/clubspark-poll-preview.ts    # ClubSpark/Newham
-npx tsx scripts/reconcile-preview.ts         # Clock 2 budget sizer
+npx tsx scripts/reconcile-preview.ts         # DIAGNOSTIC — retired reconcile budget sizer (not on the tick)
 npx tsx scripts/sweep-preview.ts             # Clock 3
 ```
 
