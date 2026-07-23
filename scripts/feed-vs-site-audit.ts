@@ -25,11 +25,11 @@ import {
   localDate,
   courtNumberFromName,
 } from "../src/lib/ingest/openactive/parse";
+import { isNonTennisName } from "../src/lib/non-tennis";
 
 type Rec = Record<string, unknown>;
 
-const NON_TENNIS = ["cricket", "netball", "football", "basketball", "bowls", "bowling", "padel", "paddle"];
-const isTennis = (name: string | null | undefined) => !NON_TENNIS.some((k) => (name ?? "").toLowerCase().includes(k));
+const isTennis = (name: string | null | undefined) => !isNonTennisName(name);
 
 const DAYS = parseInt(process.argv[2] || "8", 10);
 const key = (slug: string, date: string, hour: string, court: number | null) => `${slug}|${date}|${hour}|court${court ?? "?"}`;

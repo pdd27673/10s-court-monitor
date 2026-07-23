@@ -4,6 +4,8 @@
  * scoped to London while remaining fully data-driven (no hardcoded venue list).
  */
 
+import { isNonTennisName } from "../../non-tennis";
+
 // --- Greater London bounding box (approx). Keeps the national feed London-only. ---
 export const LONDON_BBOX = { minLat: 51.28, maxLat: 51.70, minLng: -0.53, maxLng: 0.34 };
 
@@ -153,9 +155,21 @@ export function parseFacilityUse(data: RawFacilityUse): ParsedVenue | null {
       return acc;
     }, {}) ?? null;
 
-  const courts: ParsedCourt[] = (data.individualFacilityUse ?? [])
-    .filter((c) => c["@id"])
+  const rawCourts = (data.individualFacilityUse ?? []).filter((c) => c["@id"]);
+  // Drop non-tennis courts (padel, cricket nets …) so they never reach the
+  // `courts` table — the slot ingest resolves feed slots against that table, so
+  // a padel court filtered out here can't leak its slots into the feed.
+  const courts: ParsedCourt[] = rawCourts
+    .filter((c) => !isNonTennisName(c.name))
     .map((c) => ({ externalId: c["@id"] as string, name: c.name ?? null }));
+
+  // Skip the whole facility when it's non-tennis: either the venue itself is
+  // named for another sport (a dedicated padel club), or every court it listed
+  // was non-tennis. A metadata-only facility (no court list) is left alone —
+  // those are existing tennis venues we enrich, not new non-tennis ones.
+  if (isNonTennisName(name) || (rawCourts.length > 0 && courts.length === 0)) {
+    return null;
+  }
 
   return {
     externalId,
