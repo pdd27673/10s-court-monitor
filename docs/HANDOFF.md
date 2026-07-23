@@ -2,8 +2,7 @@
 
 > Working doc, committed under `docs/`. Keep this current so a cold session can pick up.
 > Last updated: 2026-07-22.
-> Companion docs: `docs/REARCHITECTURE-PLAN.md` (full plan + phase table),
-> `docs/STAGING-CUTOVER.md` (cutover runbook), `docs/OPENACTIVE-FEED-DISCOVERY.md`.
+> Companion doc: `docs/REARCHITECTURE-PLAN.md` (full plan + phase table + cutover status).
 
 > **⚠️ Architecture changed after 2026-07-16 — read this first.** The three-clock
 > design below (feed head-poll + *watch-targeted reconcile* + daily sweep) was
@@ -106,7 +105,7 @@ The live tick (`runFeedIngest` in `api/cron/scrape/route.ts`), all writers `pers
 **Retired-not-deleted:** `reconcileWatchedVenueDays` + `computePendingSet` + `selectReconcileTargets` stay in `reconcile.ts` (tested, `scripts/reconcile-*.ts`) as read-only diagnostics; not on the tick. The "bounded round-robin budget finding" above is history now — the fixed-cost sweep sidesteps it entirely.
 
 ## What's NEXT
-**The prod/staging CUTOVER (ops, not code) — the one big unfinished step for the re-arch to go live.** Code is persist:true and green; what's left is provisioning Postgres for the parallel Railway service + deploying. Full runbook: `docs/STAGING-CUTOVER.md` (staging is the clean case — fresh empty `slots`, no `"Tennis court N"` vs `"Court N"` collision; prod needs an extra truncate-first step). Needs user authorization for the Railway/prod-mutating commands.
+**Staging cutover: DONE (2026-07-23).** The feed-primary service is live on staging Postgres and has been ingesting for a while — feed head-poll + ClubSpark writing `slots`, notifications on transitions. ⚠️ **No proxy configured in staging**, so the Courtside HTML path (confirm-on-notify + the full sweep) 404s and fails safe → in staging those are effectively no-ops, which means the **~5% feed-false-negative backstop is currently absent there** and confirm-on-notify can't suppress false-positives. Feed + ClubSpark availability still land fine. To close that gap on staging: set the four `WEBSHARE_*` vars, or verify direct Courtside fetch holds from the staging IP. **Prod cutover still pending** — see the plan's "Cutover status" for the one extra prod step (truncate scraper-owned `slots` first so `"Court N"` doesn't collide with `"Tennis court N"`).
 
 **Phase 5 — split the worker service: CODE DONE (2026-07-22), deploy is ops.**
 - **`src/lib/ingest/run.ts`** — the ingest tick body (`runFeedIngest`) extracted from the cron route into one shared module. Relative imports + Next-runtime-free so it runs under both Next and `tsx`. Also **throttled `runCleanup`** behind a new `cleanup` clock (`CLEANUP_INTERVAL_HOURS`, default 6h) — a per-tick `VACUUM` would thrash the DB now that the worker ticks every ~30s.
