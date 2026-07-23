@@ -83,6 +83,46 @@ describe("parseFacilityUse", () => {
     expect(v.slug).toBe("abington-park");
     expect(v.courts).toHaveLength(1);
   });
+
+  it("drops padel courts but keeps the tennis courts of a mixed venue", () => {
+    const v = parseFacilityUse({
+      "@id": "https://api.premiertennis.co.uk/openactive/feed/facility-uses/900",
+      identifier: "900",
+      name: "Tennis courts at Mixed Park",
+      individualFacilityUse: [
+        { "@id": ".../900/individual-facility-uses/1", name: "Court 1" },
+        { "@id": ".../900/individual-facility-uses/2", name: "Padel Court 1" },
+        { "@id": ".../900/individual-facility-uses/3", name: "Court 2" },
+      ],
+      location: { name: "Mixed Park", geo: { latitude: 51.5, longitude: -0.1 } },
+    })!;
+    expect(v.courts.map((c) => c.name)).toEqual(["Court 1", "Court 2"]);
+  });
+
+  it("skips a facility whose courts are all non-tennis", () => {
+    const v = parseFacilityUse({
+      "@id": ".../facility-uses/901",
+      identifier: "901",
+      name: "Tennis courts at Padel Only",
+      individualFacilityUse: [
+        { "@id": ".../901/individual-facility-uses/1", name: "Padel Court 1" },
+        { "@id": ".../901/individual-facility-uses/2", name: "Padel Court 2" },
+      ],
+      location: { name: "Padel Only", geo: { latitude: 51.5, longitude: -0.1 } },
+    });
+    expect(v).toBeNull();
+  });
+
+  it("skips a facility named for a non-tennis sport", () => {
+    const v = parseFacilityUse({
+      "@id": ".../facility-uses/902",
+      identifier: "902",
+      name: "Padel Club London",
+      individualFacilityUse: [{ "@id": ".../902/individual-facility-uses/1", name: "Court 1" }],
+      location: { name: "Padel Club London", geo: { latitude: 51.5, longitude: -0.1 } },
+    });
+    expect(v).toBeNull();
+  });
 });
 
 describe("feed-reference + label helpers", () => {
