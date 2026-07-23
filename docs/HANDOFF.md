@@ -119,7 +119,7 @@ The live tick (`runFeedIngest` in `api/cron/scrape/route.ts`), all writers `pers
 - **`slots.start_minute` populated** on every writer (feed from ISO wall-clock, ClubSpark/scraper from the label). `slots.time` intentionally stays the am/pm join label.
 - **`watches.dayTimes` = canonical HH:MM** — watch APIs normalise on write (accept either form); dashboard hydrates HH:MM→am/pm for its picker; contract `DayTimes` documents HH:MM. Web still shows am/pm.
 - **Migration** `npm run db:migrate-daytimes [--dry-run]` — idempotent cleanup (matching already format-agnostic, so no flag-day). Gates green (152 tests, typecheck+contract, lint, build). **Ops remaining:** run the migration on staging + prod.
-**Phase 7 — contract 0.2.0 + website + map: BACKBONE DONE (2026-07-23), map pending.**
+**Phase 7 — contract 0.2.0 + website + map: CODE DONE (2026-07-23).**
 - **Contract 0.2.0** (`packages/contract`) — additive optional fields: `Venue` += operator/address/postcode/amenities/bookingUrl/active/lat/lng; `AvailabilitySlot` += startsAt/endsAt/remainingUses/bookingUrl; new `RegisterPushInput` (expo-push forward-hook). Version bumped 0.1.0→0.2.0. **Publish is ops:** push a `contract-v0.2.0` git tag → `publish-contract.yml` publishes to GitHub Packages.
 - **`/api/venues`** now reads DB venues (feed-enriched: geo/address/amenities/operator/bookingUrl/active), merging clubspark id/host from `constants` by slug; falls back to static config if the DB is empty. Resolves the code-vs-DB split.
 - **`/api/availability`** emits the new per-slot fields (startsAt/endsAt/remainingUses/bookingUrl), additive.
