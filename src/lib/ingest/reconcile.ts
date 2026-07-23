@@ -28,10 +28,19 @@ import { slots, venues, watches, courts, feedState } from "../schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { scrapeCourtside } from "../scrapers/courtside";
 import { courtNumberFromName, isNewlyAvailable } from "./openactive/parse";
+import { toHhmm, anyToMinutes } from "../time";
 import { VENUES } from "../constants";
 import type { SlotChange } from "../differ";
 
 const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+
+/** Canonical time part for a composite (venue|date|time[|court]) key: normalises
+ * "7pm" and "19:00" to the same "HH:MM" so watch-derived and slot-derived keys
+ * compare equal across the dayTimes migration. Falls back to lowercased/trimmed
+ * for anything unparseable (keeps a stable key rather than dropping the entry). */
+function timeKeyPart(time: string): string {
+  return toHhmm(time) ?? time.toLowerCase().trim();
+}
 
 /** A watch's preferred times for a given day name, honouring the new `dayTimes`
  * JSON and falling back to the legacy weekday/weekend fields. Mirrors the
@@ -100,7 +109,7 @@ export function buildWatchCandidates(
       const times = watchPreferredTimes(w, dayName);
       for (const slug of venuesForWatch) {
         for (const time of times) {
-          candidates.add(`${slug}|${date}|${time.toLowerCase().trim()}`);
+          candidates.add(`${slug}|${date}|${timeKeyPart(time)}`);
         }
       }
     }
@@ -173,7 +182,7 @@ export async function computePendingSet(opts: { windowDays?: number } = {}): Pro
       .where(and(inArray(slots.venueId, venueIdsInvolved), inArray(slots.date, dates)));
     for (const r of rows) {
       if (r.status === "available") {
-        availableAt.add(`${slugById.get(r.venueId)}|${r.date}|${r.time.toLowerCase().trim()}`);
+        availableAt.add(`${slugById.get(r.venueId)}|${r.date}|${timeKeyPart(r.time)}`);
       }
     }
   }
@@ -344,6 +353,7 @@ async function upsertReconciledSlot(
   canon: { court: string; courtId: number | null }
 ): Promise<void> {
   const now = new Date().toISOString();
+  const startMinute = anyToMinutes(s.time); // canonical minute-of-day (Phase 6)
   await db
     .insert(slots)
     .values({
@@ -354,6 +364,7 @@ async function upsertReconciledSlot(
       status: s.status,
       price: s.price ?? null,
       courtId: canon.courtId ?? undefined,
+      startMinute,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -362,6 +373,7 @@ async function upsertReconciledSlot(
         status: s.status,
         price: s.price ?? null,
         courtId: canon.courtId ?? undefined,
+        startMinute,
         updatedAt: now,
       },
     });
@@ -421,7 +433,7 @@ async function scrapeAndReconcileVenueDays(
       // canonicalisation — an unmappable court label is still a real free court
       // for notification purposes (watches match on time, not court).
       if (s.status === "available") {
-        availableSet.add(`${vd.venueSlug}|${s.date}|${s.time.toLowerCase().trim()}`);
+        availableSet.add(`${vd.venueSlug}|${s.date}|${timeKeyPart(s.time)}`);
       }
 
       const canon = canonicalCourtLabel(s.court, venue.courts);
@@ -603,9 +615,9 @@ export async function fullSweep(
 const CONFIRM_MAX_VENUE_DAYS = parseInt(process.env.CONFIRM_MAX_VENUE_DAYS || "20", 10);
 
 const confirmTimeKey = (venue: string, date: string, time: string) =>
-  `${venue}|${date}|${time.toLowerCase().trim()}`;
+  `${venue}|${date}|${timeKeyPart(time)}`;
 const confirmFullKey = (c: SlotChange) =>
-  `${c.venue}|${c.date}|${c.time.toLowerCase().trim()}|${c.court}`;
+  `${c.venue}|${c.date}|${timeKeyPart(c.time)}|${c.court}`;
 
 export interface ConfirmSummary {
   /** feed transitions handed in. */

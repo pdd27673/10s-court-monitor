@@ -33,6 +33,7 @@ import { and, eq } from "drizzle-orm";
 import { scrapeClubSpark } from "../../scrapers/clubspark";
 import { VENUES } from "../../constants";
 import { isNewlyAvailable } from "../openactive/parse";
+import { anyToMinutes } from "../../time";
 import type { SlotChange } from "../../differ";
 
 export interface ClubSparkPollSummary {
@@ -138,6 +139,7 @@ async function upsertClubSparkSlot(
   courtId: number | null
 ): Promise<void> {
   const now = new Date().toISOString();
+  const startMinute = anyToMinutes(s.time); // canonical minute-of-day (Phase 6)
   await db
     .insert(slots)
     .values({
@@ -148,11 +150,12 @@ async function upsertClubSparkSlot(
       status: s.status,
       price: s.price ?? null,
       courtId: courtId ?? undefined,
+      startMinute,
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [slots.venueId, slots.date, slots.time, slots.court],
-      set: { status: s.status, price: s.price ?? null, courtId: courtId ?? undefined, updatedAt: now },
+      set: { status: s.status, price: s.price ?? null, courtId: courtId ?? undefined, startMinute, updatedAt: now },
     });
 }
 

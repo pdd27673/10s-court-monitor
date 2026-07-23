@@ -280,8 +280,10 @@ describe("activeWatchCandidates (DB)", () => {
     await addWatch(null, ["9am"]); // all active venues
 
     const cand = await activeWatchCandidates({ windowDays: 1 });
-    expect(cand.has(`victoria-park|${TODAY}|7pm`)).toBe(true);
-    expect(cand.has(`victoria-park|${TODAY}|9am`)).toBe(true); // via the all-venues watch
+    // Keys are canonical HH:MM now (watch stored "7pm"/"9am" → "19:00"/"09:00"),
+    // so slot labels and watch times compare equal across the dayTimes migration.
+    expect(cand.has(`victoria-park|${TODAY}|19:00`)).toBe(true);
+    expect(cand.has(`victoria-park|${TODAY}|09:00`)).toBe(true); // via the all-venues watch
     expect([...cand].some((k) => k.startsWith("st-johns-park"))).toBe(false);
   });
 });

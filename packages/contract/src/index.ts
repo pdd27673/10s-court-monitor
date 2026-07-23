@@ -11,7 +11,10 @@ export type VenueType = "courtside" | "clubspark";
 
 export type ChannelType = "telegram" | "email" | "expo-push";
 
-/** Per-day preferred times, e.g. `{ monday: ["18:00", "19:00"] }`. */
+/** Per-day preferred times in canonical 24h `"HH:MM"`, e.g.
+ * `{ monday: ["18:00", "19:00"] }`. The API stores and returns this form; the web
+ * client renders am/pm for display. (Legacy am/pm labels like `"7pm"` are accepted
+ * on write and normalised server-side for backward compatibility.) */
 export type DayTimes = Record<string, string[]>;
 
 export type VenueSummary = {

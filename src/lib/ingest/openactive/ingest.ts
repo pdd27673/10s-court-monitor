@@ -14,6 +14,7 @@
 import { db } from "../../db";
 import { venues, courts, slots, feedState } from "../../schema";
 import { and, eq } from "drizzle-orm";
+import { minutesFromIso } from "../../time";
 import { walkToHead, FEED_FACILITY_USES, FEED_SLOTS, type RpdeItem } from "./client";
 import type { SlotChange } from "../../differ";
 import {
@@ -254,6 +255,7 @@ function slotRowValues(court: CourtRef, s: ParsedSlot, date: string, time: strin
       price: s.price != null ? String(s.price) : null,
       startsAt: new Date(s.startsAt),
       endsAt: s.endsAt ? new Date(s.endsAt) : null,
+      startMinute: minutesFromIso(s.startsAt), // canonical minute-of-day (Phase 6)
       remainingUses: s.remainingUses,
       maxUses: s.maxUses,
       updatedAt: new Date().toISOString(),
@@ -276,6 +278,7 @@ async function upsertSlotRow(values: SlotRowValues): Promise<void> {
         courtId: values.courtId,
         startsAt: values.startsAt,
         endsAt: values.endsAt,
+        startMinute: values.startMinute,
         remainingUses: values.remainingUses,
         maxUses: values.maxUses,
         updatedAt: values.updatedAt,

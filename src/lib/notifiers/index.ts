@@ -3,6 +3,7 @@ import { notificationChannels, notificationLog, watches } from "../schema";
 import { SlotChange } from "../differ";
 import { sendTelegramMessage, formatSlotChangesForTelegram } from "./telegram";
 import { sendEmail, formatSlotChangesForEmail, sendScrapeFailureAlert, sendScrapeSummary } from "./email";
+import { anyToMinutes } from "../time";
 import { eq, and } from "drizzle-orm";
 
 export { sendScrapeFailureAlert, sendScrapeSummary };
@@ -62,9 +63,11 @@ function matchesWatch(
   // If no times configured for this specific day, skip
   if (preferredTimes.length === 0) return false;
 
-  // Direct match on am/pm times (e.g., "5pm", "6pm")
-  const changeTime = change.time.toLowerCase().trim();
-  if (!preferredTimes.some((t) => t.toLowerCase().trim() === changeTime)) {
+  // Compare on minute-of-day, not label strings — so a watch stored as "19:00"
+  // matches a slot labelled "7pm" (and vice versa) through the dayTimes migration.
+  const changeMinutes = anyToMinutes(change.time);
+  if (changeMinutes === null) return false;
+  if (!preferredTimes.some((t) => anyToMinutes(t) === changeMinutes)) {
     return false;
   }
 

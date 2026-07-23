@@ -113,8 +113,13 @@ The live tick (`runFeedIngest` in `api/cron/scrape/route.ts`), all writers `pers
 - **cron route** thinned to call the shared `runFeedIngest`; stays as a manual/fallback HTTP trigger (secret + single-flight kept). Admin route unchanged.
 - **`railway.worker.json`** — ready-to-use config for the 2nd service: no healthcheck, no `db:migrate` (web owns migrations), and **`startCommand` execs tsx directly**. ⚠️ **Signal finding (verified):** `npm run worker` does NOT forward SIGTERM (worker gets SIGKILL'd mid-tick, exit 143); `exec ./node_modules/.bin/tsx …` drains cleanly (exit 0). Do not start the worker via `npm`.
 - **Ops remaining (needs user):** create the 2nd Railway service in the same project/env, point its config at `railway.worker.json`, reference the shared `DATABASE_URL`, deploy — then **disable the external cron** hitting `/api/cron/scrape` so ingest doesn't run twice. Gates all green (134 tests, typecheck, lint, `next build`); worker harness smoke-tested (startup/tick/failure-isolation/graceful-shutdown).
-**Phase 6 — normalize time end-to-end** (`slots`/`watches` → `HH:MM`/`starts_at`); fix `matchesWatch` (`src/lib/notifiers/index.ts` — currently string-equality on "7pm" labels).
-**Phase 7 — contract 0.2.0 + website wiring + map** (lat/lng markers, bbox query) + expanded venue list.
+**Phase 6 — normalize time: CODE DONE (2026-07-23).**
+- **`src/lib/time.ts`** — one canonical form (minute-of-day). Helpers: `anyToMinutes` (accepts "7pm" or "19:00"), `toHhmm`/`toLabel`, `normalizeDayTimes`/`dayTimesToLabels`, `minutesFromIso`. 16 unit tests.
+- **Matching on minutes, not labels** — `matchesWatch` (`notifiers/index.ts`), confirm-on-notify + pending-set keys (`reconcile.ts`) all compare via `anyToMinutes`. The "7pm" string-equality coupling is gone; old and new formats match through the migration (+2 mixed-format notifier tests).
+- **`slots.start_minute` populated** on every writer (feed from ISO wall-clock, ClubSpark/scraper from the label). `slots.time` intentionally stays the am/pm join label.
+- **`watches.dayTimes` = canonical HH:MM** — watch APIs normalise on write (accept either form); dashboard hydrates HH:MM→am/pm for its picker; contract `DayTimes` documents HH:MM. Web still shows am/pm.
+- **Migration** `npm run db:migrate-daytimes [--dry-run]` — idempotent cleanup (matching already format-agnostic, so no flag-day). Gates green (152 tests, typecheck+contract, lint, build). **Ops remaining:** run the migration on staging + prod.
+**Phase 7 — contract 0.2.0 + website wiring + map** (lat/lng markers, bbox query) + expanded venue list. Note: `DayTimes`→HH:MM (the contract's time-format piece) already landed in Phase 6.
 
 **Also tracked:** `abbotts-park` stale row (delete after confirming empty). `.runbook.md` committed secrets (rotate + remove).
 

@@ -190,6 +190,44 @@ describe("notifyUsers", () => {
     expect(sendTelegramMessage).not.toHaveBeenCalled();
   });
 
+  it("matches across time formats: canonical HH:MM watch vs am/pm slot label", async () => {
+    const { userId, venueId } = await seedUserVenue();
+    await testDb().insert(watches).values({
+      userId,
+      venueId,
+      dayTimes: JSON.stringify({ monday: ["17:00"] }), // canonical form
+      active: 1,
+    });
+    await testDb().insert(notificationChannels).values({
+      userId,
+      type: "telegram",
+      destination: "chat-1",
+      active: 1,
+    });
+
+    await notifyUsers([change({ time: "5pm" })]); // legacy label — must still match
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches across time formats: am/pm watch vs canonical HH:MM slot label", async () => {
+    const { userId, venueId } = await seedUserVenue();
+    await testDb().insert(watches).values({
+      userId,
+      venueId,
+      dayTimes: JSON.stringify({ monday: ["5pm"] }), // legacy form
+      active: 1,
+    });
+    await testDb().insert(notificationChannels).values({
+      userId,
+      type: "telegram",
+      destination: "chat-1",
+      active: 1,
+    });
+
+    await notifyUsers([change({ time: "17:00" })]); // canonical label — must still match
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+  });
+
   it("does not log a send that threw", async () => {
     const { userId, venueId } = await seedUserVenue();
     await testDb().insert(watches).values({

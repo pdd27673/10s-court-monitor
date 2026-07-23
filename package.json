@@ -19,6 +19,7 @@
     "db:sync": "tsx scripts/db-migrate.ts --push",
     "db:normalize-emails": "tsx scripts/normalize-emails.ts",
     "db:migrate-watches": "tsx scripts/migrate-watches-to-days.ts",
+    "db:migrate-daytimes": "tsx scripts/migrate-daytimes-to-hhmm.ts",
     "db:migrate-data": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "db:seed-venues": "tsx scripts/seed-venue-metadata.ts",
     "maintain": "tsx scripts/maintain.ts",
