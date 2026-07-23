@@ -101,3 +101,34 @@ export async function walkToHead<T = unknown>(
   }
   return { cursor: url, pages, items };
 }
+
+/**
+ * Walk `startUrl` to the head and reduce the stream to the LATEST state per feed
+ * `id`: an "updated" item wins, a "deleted" item drops the id (RPDE's
+ * upsert/tombstone semantics). Returns that map, the count of deletes seen, and
+ * the walk result (head cursor). This is the shared front half of all three
+ * ingest passes (facilities, slot backfill, slot delta poll) — each then iterates
+ * `latest.values()` and applies its own row logic.
+ */
+export async function collectLatest<T = Record<string, unknown>>(
+  startUrl: string,
+  opts: WalkOptions = {}
+): Promise<{ latest: Map<string, RpdeItem<T>>; deleted: number; walk: WalkResult }> {
+  const latest = new Map<string, RpdeItem<T>>();
+  let deleted = 0;
+  const walk = await walkToHead<T>(
+    startUrl,
+    (items) => {
+      for (const it of items) {
+        if (it.state === "deleted") {
+          deleted++;
+          latest.delete(String(it.id));
+        } else {
+          latest.set(String(it.id), it);
+        }
+      }
+    },
+    opts
+  );
+  return { latest, deleted, walk };
+}

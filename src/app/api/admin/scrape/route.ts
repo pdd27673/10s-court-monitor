@@ -3,26 +3,21 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { ensureVenuesExist } from "@/lib/differ";
-import { notifyUsers } from "@/lib/notifiers";
-import { ingestFacilities, pollSlots } from "@/lib/ingest/openactive/ingest";
-import { fullSweep, confirmFeedChanges } from "@/lib/ingest/reconcile";
-import { pollClubSpark } from "@/lib/ingest/clubspark/ingest";
-import type { SlotChange } from "@/lib/differ";
-
-const CONFIRM_ON_NOTIFY = !/^(off|false|0)$/i.test(process.env.CONFIRM_ON_NOTIFY ?? "on");
+import { runFeedIngest } from "@/lib/ingest/run";
 
 /**
- * Admin "refresh now" trigger. Runs the feed-primary ingestion on demand,
- * unthrottled: refresh venues/courts from the facility feed, delta-poll the slots
- * feed (Clock 1) and confirm watched flips against the live site, poll ClubSpark,
- * then a full sweep as the correctness floor. Transitions are unioned into one
- * notifyUsers call.
+ * Admin "refresh now" trigger. Runs the exact same pipeline as the cron/worker
+ * (`runFeedIngest`) but in `force` mode — bypassing the per-clock throttles so
+ * every availability stage runs immediately. Kept in one place so admin can't
+ * drift from the scheduled path.
  */
+
+// Prevent overlapping manual runs within this process.
+let isJobRunning = false;
+
 export async function POST() {
   try {
     const session = await auth();
-
     if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -33,38 +28,17 @@ export async function POST() {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Run ingestion in the background
-    (async () => {
-      try {
-        await ensureVenuesExist();
-        await ingestFacilities();
+    if (isJobRunning) {
+      return NextResponse.json({ error: "Ingest job already running" }, { status: 409 });
+    }
 
-        const changes: SlotChange[] = [];
-        const poll = await pollSlots({ persist: true });
-        if (CONFIRM_ON_NOTIFY && poll.changes.length > 0) {
-          const cf = await confirmFeedChanges(poll.changes, { persist: true });
-          changes.push(...cf.changes);
-        } else {
-          changes.push(...poll.changes);
-        }
-        const clubspark = await pollClubSpark({ persist: true });
-        changes.push(...clubspark.changes);
-        const sweep = await fullSweep({ persist: true });
-        changes.push(...sweep.changes);
-
-        if (changes.length > 0) {
-          await notifyUsers(changes);
-        }
-
-        console.log(
-          `Manual ingest completed: poll ${poll.slotsUpserted} upserts / ${poll.transitions} transitions, ` +
-            `clubspark ${clubspark.slotsUpserted} upserts / ${clubspark.transitions} transitions, ` +
-            `sweep ${sweep.upserted} upserts / ${sweep.transitions} transitions`
-        );
-      } catch (error) {
-        console.error("Manual ingest failed:", error);
-      }
-    })();
+    // Run the full pipeline unthrottled in the background (don't await).
+    isJobRunning = true;
+    runFeedIngest({ force: true })
+      .catch((error) => console.error("Manual ingest failed:", error))
+      .finally(() => {
+        isJobRunning = false;
+      });
 
     return NextResponse.json({ success: true, message: "Ingest started" });
   } catch (error) {

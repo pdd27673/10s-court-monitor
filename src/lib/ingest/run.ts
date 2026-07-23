@@ -25,6 +25,7 @@ import type { SlotChange } from "../differ";
 import { ingestFacilities, pollSlots } from "./openactive/ingest";
 import { fullSweep, confirmFeedChanges, type ConfirmSummary } from "./reconcile";
 import { pollClubSpark } from "./clubspark/ingest";
+import { upsertFeedState } from "./feed-state";
 
 // How often to refresh venue metadata + courts from the OpenActive facility feed.
 // Facilities change rarely, so this runs far less often than the slot poll.
@@ -57,19 +58,21 @@ const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS || "6
  * a feed hiccup logs and returns — it never breaks the ingest cycle. Populating
  * `courts` is also the prereq for slot→court resolution in the slot clocks.
  */
-async function maybeIngestFacilities() {
+async function maybeIngestFacilities(force = false) {
   try {
-    const [state] = await db
-      .select({ lastPolledAt: feedState.lastPolledAt })
-      .from(feedState)
-      .where(and(eq(feedState.source, "openactive"), eq(feedState.feed, "facility-uses")))
-      .limit(1);
+    if (!force) {
+      const [state] = await db
+        .select({ lastPolledAt: feedState.lastPolledAt })
+        .from(feedState)
+        .where(and(eq(feedState.source, "openactive"), eq(feedState.feed, "facility-uses")))
+        .limit(1);
 
-    if (state?.lastPolledAt) {
-      const ageMs = Date.now() - new Date(state.lastPolledAt).getTime();
-      if (ageMs < FACILITY_REFRESH_HOURS * 3600_000) {
-        console.log(`Facility refresh skipped (last run ${(ageMs / 3600_000).toFixed(1)}h ago)`);
-        return;
+      if (state?.lastPolledAt) {
+        const ageMs = Date.now() - new Date(state.lastPolledAt).getTime();
+        if (ageMs < FACILITY_REFRESH_HOURS * 3600_000) {
+          console.log(`Facility refresh skipped (last run ${(ageMs / 3600_000).toFixed(1)}h ago)`);
+          return;
+        }
       }
     }
 
@@ -124,11 +127,7 @@ async function clockDue(feed: string, intervalMs: number): Promise<boolean> {
 }
 
 async function stampClock(feed: string): Promise<void> {
-  const now = new Date().toISOString();
-  await db
-    .insert(feedState)
-    .values({ source: "clock", feed, lastPolledAt: now })
-    .onConflictDoUpdate({ target: [feedState.source, feedState.feed], set: { lastPolledAt: now } });
+  await upsertFeedState("clock", feed);
 }
 
 // How many individual transition lines to print per clock before summarizing the
@@ -184,13 +183,23 @@ function logConfirm(cf: ConfirmSummary): void {
  *              Fixed-cost false-negative discovery + dashboard-correctness net.
  *   cleanup  — retention + VACUUM, throttled to CLEANUP_INTERVAL_HOURS.
  */
-export async function runFeedIngest(): Promise<void> {
+export async function runFeedIngest(opts: { force?: boolean } = {}): Promise<void> {
+  // `force` = the admin "refresh now" mode: bypass the per-clock throttles so
+  // every availability stage runs this tick (facility refresh + clubspark +
+  // sweep). Housekeeping (cleanup/VACUUM) stays throttled regardless — a manual
+  // refresh shouldn't trigger a heavy VACUUM.
+  const force = opts.force ?? false;
+  const availabilityDue = async (feed: string, ms: number) => force || clockDue(feed, ms);
   try {
-    console.log("Starting feed-primary ingest (feed → confirm → clubspark → sweep)...");
+    console.log(
+      force
+        ? "Starting feed-primary ingest (manual refresh — unthrottled)..."
+        : "Starting feed-primary ingest (feed → confirm → clubspark → sweep)..."
+    );
     await ensureVenuesExist();
-    // Keep venues/courts/geo fresh (throttled, failure-isolated). Also the
-    // prereq that populates `courts` so slot→court resolution works.
-    await maybeIngestFacilities();
+    // Keep venues/courts/geo fresh (throttled unless forced, failure-isolated).
+    // Also the prereq that populates `courts` so slot→court resolution works.
+    await maybeIngestFacilities(force);
 
     const allChanges: SlotChange[] = [];
 
@@ -242,7 +251,7 @@ export async function runFeedIngest(): Promise<void> {
 
     // ClubSpark (Newham) — first-party JSON snapshot poll, throttled. Direct
     // truth (no RPDE staleness), so it needs no reconcile clock of its own.
-    if (await clockDue("clubspark", CLUBSPARK_INTERVAL_MIN * 60_000)) {
+    if (await availabilityDue("clubspark", CLUBSPARK_INTERVAL_MIN * 60_000)) {
       try {
         const cs = await pollClubSpark({ persist: true });
         console.log(
@@ -262,7 +271,7 @@ export async function runFeedIngest(): Promise<void> {
     // Periodic full sweep — fixed-cost false-negative discovery + dashboard floor,
     // throttled to SWEEP_INTERVAL_HOURS. Site-wins across every Courtside
     // venue-day; the only mechanism that catches slots the feed wrongly hides.
-    if (await clockDue("sweep", SWEEP_INTERVAL_HOURS * 3600_000)) {
+    if (await availabilityDue("sweep", SWEEP_INTERVAL_HOURS * 3600_000)) {
       try {
         const sweep = await fullSweep({ persist: true });
         console.log(

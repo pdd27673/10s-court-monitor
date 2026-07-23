@@ -29,11 +29,11 @@
  */
 import { db } from "../../db";
 import { venues, courts, slots } from "../../schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { scrapeClubSpark } from "../../scrapers/clubspark";
 import { VENUES } from "../../constants";
-import { isNewlyAvailable } from "../openactive/parse";
-import { anyToMinutes } from "../../time";
+import { detectSlotTransition } from "../slot-write";
+import { anyToMinutes, nextDates } from "../../time";
 import type { SlotChange } from "../../differ";
 
 export interface ClubSparkPollSummary {
@@ -55,18 +55,8 @@ export interface ClubSparkPollSummary {
 /** The window of local dates ("YYYY-MM-DD") starting today, plus the start/end
  * bounds the ClubSpark endpoint is queried with (one call covers the range). */
 function windowRange(windowDays: number, from = new Date()): { startDate: string; endDate: string; dates: Set<string> } {
-  const dates = new Set<string>();
-  let startDate = "";
-  let endDate = "";
-  for (let i = 0; i < windowDays; i++) {
-    const d = new Date(from);
-    d.setDate(from.getDate() + i);
-    const s = d.toISOString().slice(0, 10);
-    dates.add(s);
-    if (i === 0) startDate = s;
-    endDate = s;
-  }
-  return { startDate, endDate, dates };
+  const all = nextDates(windowDays, from);
+  return { startDate: all[0], endDate: all[all.length - 1], dates: new Set(all) };
 }
 
 /** Resolve the DB venue for a ClubSpark config, creating/enriching it when
@@ -201,28 +191,13 @@ export async function pollClubSpark(
       for (const s of scraped) {
         const courtId = courtIdByName.get(s.court) ?? null;
 
-        const existing = await db.query.slots.findFirst({
-          where: and(
-            eq(slots.venueId, resolved.id),
-            eq(slots.date, s.date),
-            eq(slots.time, s.time),
-            eq(slots.court, s.court)
-          ),
+        const { change } = await detectSlotTransition(resolved.id, s, {
+          venue: cfg.slug,
+          venueName: resolved.name,
         });
-        const oldStatus = existing?.status ?? null;
-
-        if (isNewlyAvailable(oldStatus, s.status)) {
+        if (change) {
           transitions++;
-          changes.push({
-            venue: cfg.slug,
-            venueName: resolved.name,
-            date: s.date,
-            time: s.time,
-            court: s.court,
-            oldStatus,
-            newStatus: s.status,
-            price: s.price,
-          });
+          changes.push(change);
         }
 
         if (persist) {

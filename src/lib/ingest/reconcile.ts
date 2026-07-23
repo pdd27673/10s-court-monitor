@@ -27,12 +27,16 @@ import { db } from "../db";
 import { slots, venues, watches, courts, feedState } from "../schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { scrapeCourtside } from "../scrapers/courtside";
-import { courtNumberFromName, isNewlyAvailable } from "./openactive/parse";
-import { toHhmm, anyToMinutes } from "../time";
+import { courtNumberFromName } from "./openactive/parse";
+import { toHhmm, anyToMinutes, DAY_NAMES, nextDates, watchPreferredTimes } from "../time";
+import { upsertFeedState } from "./feed-state";
+import { detectSlotTransition } from "./slot-write";
 import { VENUES } from "../constants";
 import type { SlotChange } from "../differ";
 
-const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+// Re-exported for existing importers (tests, scripts/maintain.ts) that pull these
+// from here; the definitions now live in ../time.
+export { nextDates, watchPreferredTimes };
 
 /** Canonical time part for a composite (venue|date|time[|court]) key: normalises
  * "7pm" and "19:00" to the same "HH:MM" so watch-derived and slot-derived keys
@@ -40,43 +44,6 @@ const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "frid
  * for anything unparseable (keeps a stable key rather than dropping the entry). */
 function timeKeyPart(time: string): string {
   return toHhmm(time) ?? time.toLowerCase().trim();
-}
-
-/** A watch's preferred times for a given day name, honouring the new `dayTimes`
- * JSON and falling back to the legacy weekday/weekend fields. Mirrors the
- * extraction in `notifiers/index.ts:matchesWatch` so the reconcile targets the
- * exact slots that would notify. */
-export function watchPreferredTimes(
-  watch: { dayTimes: string | null; weekdayTimes: string | null; weekendTimes: string | null },
-  dayName: string
-): string[] {
-  if (watch.dayTimes) {
-    try {
-      const parsed = JSON.parse(watch.dayTimes) as Record<string, string[]>;
-      return parsed[dayName] ?? [];
-    } catch {
-      return [];
-    }
-  }
-  const isWeekend = dayName === "saturday" || dayName === "sunday";
-  const legacy = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
-  if (!legacy) return [];
-  try {
-    return JSON.parse(legacy) as string[];
-  } catch {
-    return [];
-  }
-}
-
-/** The next `n` local dates ("YYYY-MM-DD"), starting today. */
-export function nextDates(n: number, from = new Date()): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < n; i++) {
-    const d = new Date(from);
-    d.setDate(from.getDate() + i);
-    out.push(d.toISOString().slice(0, 10));
-  }
-  return out;
 }
 
 /** The watch fields that determine which (venue,date,time) it would notify on. */
@@ -336,12 +303,7 @@ async function loadReconcileState(): Promise<Map<string, number>> {
 
 /** Stamp a venue-day as just reconciled (advances its round-robin cursor). */
 async function markReconciled(venueSlug: string, date: string): Promise<void> {
-  const feed = `${venueSlug}|${date}`;
-  const now = new Date().toISOString();
-  await db
-    .insert(feedState)
-    .values({ source: RECONCILE_SOURCE, feed, lastPolledAt: now })
-    .onConflictDoUpdate({ target: [feedState.source, feedState.feed], set: { lastPolledAt: now } });
+  await upsertFeedState(RECONCILE_SOURCE, `${venueSlug}|${date}`);
 }
 
 /** Site-wins upsert: write the scraped status/price into the feed-owned row,
@@ -439,28 +401,14 @@ async function scrapeAndReconcileVenueDays(
       const canon = canonicalCourtLabel(s.court, venue.courts);
       if (!canon) continue;
 
-      const existing = await db.query.slots.findFirst({
-        where: and(
-          eq(slots.venueId, venue.id),
-          eq(slots.date, s.date),
-          eq(slots.time, s.time),
-          eq(slots.court, canon.court)
-        ),
-      });
-      const oldStatus = existing?.status ?? null;
-
-      if (isNewlyAvailable(oldStatus, s.status)) {
+      const { change } = await detectSlotTransition(
+        venue.id,
+        { date: s.date, time: s.time, court: canon.court, status: s.status, price: s.price },
+        { venue: vd.venueSlug, venueName: venue.name }
+      );
+      if (change) {
         transitions++;
-        changes.push({
-          venue: vd.venueSlug,
-          venueName: venue.name,
-          date: s.date,
-          time: s.time,
-          court: canon.court,
-          oldStatus,
-          newStatus: s.status,
-          price: s.price,
-        });
+        changes.push(change);
       }
 
       if (persist) {

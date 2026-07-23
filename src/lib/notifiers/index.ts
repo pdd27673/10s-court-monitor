@@ -3,7 +3,7 @@ import { notificationChannels, notificationLog, watches } from "../schema";
 import { SlotChange } from "../differ";
 import { sendTelegramMessage, formatSlotChangesForTelegram } from "./telegram";
 import { sendEmail, formatSlotChangesForEmail, sendScrapeFailureAlert, sendScrapeSummary } from "./email";
-import { anyToMinutes } from "../time";
+import { anyToMinutes, DAY_NAMES, watchPreferredTimes } from "../time";
 import { eq, and } from "drizzle-orm";
 
 export { sendScrapeFailureAlert, sendScrapeSummary };
@@ -27,38 +27,11 @@ function matchesWatch(
 
   // Check day of week and time preferences
   const date = new Date(change.date);
-  const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  const dayName = DAY_NAMES[date.getDay()]; // 0 = Sunday … 6 = Saturday
 
-  // Map day of week to day name
-  const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const dayName = dayNames[dayOfWeek];
-
-  let preferredTimes: string[] = [];
-
-  // Try new dayTimes format first
-  if (watch.dayTimes) {
-    try {
-      const dayTimes = JSON.parse(watch.dayTimes);
-      preferredTimes = dayTimes[dayName] || [];
-    } catch {
-      // If JSON parse fails, skip this watch
-      return false;
-    }
-  } else {
-    // Fall back to legacy weekday/weekend format
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const timesJson = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
-
-    // If no times configured for this day type, skip
-    if (!timesJson) return false;
-
-    try {
-      preferredTimes = JSON.parse(timesJson);
-    } catch {
-      // If JSON parse fails, skip this watch
-      return false;
-    }
-  }
+  // Shared with the reconcile/pending planner so matching and targeting never
+  // drift; dayTimes-first with legacy weekday/weekend fallback, [] on bad JSON.
+  const preferredTimes = watchPreferredTimes(watch, dayName);
 
   // If no times configured for this specific day, skip
   if (preferredTimes.length === 0) return false;

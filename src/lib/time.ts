@@ -128,3 +128,49 @@ export function minutesFromIso(iso: string): number | null {
   if (!m) return null;
   return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
 }
+
+// ---- Calendar-day helpers (venue-local, UTC wall clock) ----
+
+/** Day-of-week names indexed by `Date.getDay()` (0 = Sunday). The single source
+ * for the watch matcher and the reconcile/pending planner so they never diverge. */
+export const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+
+/** The next `n` local dates ("YYYY-MM-DD"), starting at `from` (today by default).
+ * One home for the window arithmetic used by every ingest clock — keeping the
+ * UTC-vs-local date math in a single place to reason about. */
+export function nextDates(n: number, from = new Date()): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(from);
+    d.setDate(from.getDate() + i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/** A watch's preferred times for a given day name, honouring the new `dayTimes`
+ * JSON and falling back to the legacy weekday/weekend fields. The single source
+ * for "what times does this watch want on this day" — shared by the notifier
+ * matcher (`notifiers/index.ts`) and the reconcile/pending planner so they can't
+ * drift. Pure; malformed JSON yields `[]` (i.e. no match). */
+export function watchPreferredTimes(
+  watch: { dayTimes: string | null; weekdayTimes: string | null; weekendTimes: string | null },
+  dayName: string
+): string[] {
+  if (watch.dayTimes) {
+    try {
+      const parsed = JSON.parse(watch.dayTimes) as Record<string, string[]>;
+      return parsed[dayName] ?? [];
+    } catch {
+      return [];
+    }
+  }
+  const isWeekend = dayName === "saturday" || dayName === "sunday";
+  const legacy = isWeekend ? watch.weekendTimes : watch.weekdayTimes;
+  if (!legacy) return [];
+  try {
+    return JSON.parse(legacy) as string[];
+  } catch {
+    return [];
+  }
+}

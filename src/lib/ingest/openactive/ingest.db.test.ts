@@ -6,14 +6,26 @@ import { initTestDb, truncateAll, testDb, dbProxy } from "../../../test/pglite";
 // (keeping the real FEED_* constants) so no network is touched.
 vi.mock("../../db", () => ({ db: dbProxy }));
 
-const walkState = vi.hoisted(() => ({ items: [] as unknown[], cursor: "HEAD-CURSOR" }));
+const walkState = vi.hoisted(() => ({ items: [] as { state: string; id: string | number }[], cursor: "HEAD-CURSOR" }));
+// ingest.ts now consumes the feed via `collectLatest` (the shared RPDE reducer),
+// so intercept THAT seam and reproduce its updated-wins/deleted-drops reduction
+// over the in-memory walkState.
 vi.mock("./client", async (orig) => {
   const actual = await orig<typeof import("./client")>();
   return {
     ...actual,
-    walkToHead: vi.fn(async (_start: string, onItems: (items: unknown[], page: unknown) => Promise<void> | void) => {
-      await onItems(walkState.items, { next: walkState.cursor, items: walkState.items });
-      return { cursor: walkState.cursor, pages: 1, items: walkState.items.length };
+    collectLatest: vi.fn(async () => {
+      const latest = new Map<string, unknown>();
+      let deleted = 0;
+      for (const it of walkState.items) {
+        if (it.state === "deleted") {
+          deleted++;
+          latest.delete(String(it.id));
+        } else {
+          latest.set(String(it.id), it);
+        }
+      }
+      return { latest, deleted, walk: { cursor: walkState.cursor, pages: 1, items: walkState.items.length } };
     }),
   };
 });

@@ -15,7 +15,9 @@ import { db } from "../../db";
 import { venues, courts, slots, feedState } from "../../schema";
 import { and, eq } from "drizzle-orm";
 import { minutesFromIso } from "../../time";
-import { walkToHead, FEED_FACILITY_USES, FEED_SLOTS, type RpdeItem } from "./client";
+import { collectLatest, FEED_FACILITY_USES, FEED_SLOTS } from "./client";
+import { upsertFeedState } from "../feed-state";
+import { detectSlotTransition } from "../slot-write";
 import type { SlotChange } from "../../differ";
 import {
   parseFacilityUse,
@@ -26,7 +28,6 @@ import {
   courtNumberFromName,
   facilityIdFromRef,
   feedSlotStatus,
-  isNewlyAvailable,
   type ParsedVenue,
   type ParsedSlot,
 } from "./parse";
@@ -130,16 +131,9 @@ async function upsertCourts(venueId: number, v: ParsedVenue, dryRun: boolean): P
 export async function ingestFacilities(opts: { startCursor?: string; dryRun?: boolean; paceMs?: number } = {}): Promise<IngestSummary> {
   const dryRun = opts.dryRun ?? false;
 
-  // Collect the latest state per facility across the walk (updated wins; deleted drops).
-  const latest = new Map<string, RpdeItem<Record<string, unknown>>>();
-  const walk = await walkToHead<Record<string, unknown>>(
+  // Reduce the walk to the latest state per facility (updated wins; deleted drops).
+  const { latest, walk } = await collectLatest<Record<string, unknown>>(
     opts.startCursor ?? FEED_FACILITY_USES,
-    (items) => {
-      for (const it of items) {
-        if (it.state === "deleted") latest.delete(String(it.id));
-        else latest.set(String(it.id), it);
-      }
-    },
     { paceMs: opts.paceMs ?? 350, label: "facility-uses" }
   );
 
@@ -159,13 +153,7 @@ export async function ingestFacilities(opts: { startCursor?: string; dryRun?: bo
   }
 
   if (!dryRun) {
-    await db
-      .insert(feedState)
-      .values({ source: "openactive", feed: "facility-uses", nextCursor: walk.cursor, lastPolledAt: new Date().toISOString() })
-      .onConflictDoUpdate({
-        target: [feedState.source, feedState.feed],
-        set: { nextCursor: walk.cursor, lastPolledAt: new Date().toISOString() },
-      });
+    await upsertFeedState("openactive", "facility-uses", { nextCursor: walk.cursor });
   }
 
   return {
@@ -306,21 +294,9 @@ export async function ingestSlots(
   const courtIndex = await loadCourtIndex();
   const tracked = trackedFacilityIds(courtIndex);
 
-  // Collect the latest state per slot across the walk (updated wins; deleted drops).
-  const latest = new Map<string, RpdeItem<Record<string, unknown>>>();
-  let deleted = 0;
-  const walk = await walkToHead<Record<string, unknown>>(
+  // Reduce the walk to the latest state per slot (updated wins; deleted drops).
+  const { latest, deleted, walk } = await collectLatest<Record<string, unknown>>(
     opts.startCursor ?? FEED_SLOTS,
-    (items) => {
-      for (const it of items) {
-        if (it.state === "deleted") {
-          deleted++;
-          latest.delete(String(it.id));
-        } else {
-          latest.set(String(it.id), it);
-        }
-      }
-    },
     { paceMs: opts.paceMs ?? 350, maxPages: opts.maxPages ?? 5000, label: "slots backfill" }
   );
 
@@ -348,13 +324,7 @@ export async function ingestSlots(
   }
 
   if (persist) {
-    await db
-      .insert(feedState)
-      .values({ source: "openactive", feed: SLOT_FEED, nextCursor: walk.cursor, lastPolledAt: new Date().toISOString() })
-      .onConflictDoUpdate({
-        target: [feedState.source, feedState.feed],
-        set: { nextCursor: walk.cursor, lastPolledAt: new Date().toISOString() },
-      });
+    await upsertFeedState("openactive", SLOT_FEED, { nextCursor: walk.cursor });
   }
 
   return {
@@ -436,21 +406,9 @@ export async function pollSlots(
   const startedFromHead = Boolean(state?.nextCursor);
   const startUrl = state?.nextCursor || FEED_SLOTS;
 
-  // Collect the latest state per slot across the walk (updated wins; deleted drops).
-  const latest = new Map<string, RpdeItem<Record<string, unknown>>>();
-  let deleted = 0;
-  const walk = await walkToHead<Record<string, unknown>>(
+  // Reduce the walk to the latest state per slot (updated wins; deleted drops).
+  const { latest, deleted, walk } = await collectLatest<Record<string, unknown>>(
     startUrl,
-    (items) => {
-      for (const it of items) {
-        if (it.state === "deleted") {
-          deleted++;
-          latest.delete(String(it.id));
-        } else {
-          latest.set(String(it.id), it);
-        }
-      }
-    },
     { paceMs: opts.paceMs ?? 350, maxPages: opts.maxPages ?? 5000, label: startedFromHead ? "slots head-poll" : "slots backfill" }
   );
 
@@ -478,28 +436,14 @@ export async function pollSlots(
     const { status: newStatus, courtLabel, values } = slotRowValues(court, s, date, time);
 
     // Prior status for transition detection (feed owns the row post-cutover).
-    const existing = await db.query.slots.findFirst({
-      where: and(
-        eq(slots.venueId, court.venueId),
-        eq(slots.date, date),
-        eq(slots.time, time),
-        eq(slots.court, courtLabel)
-      ),
-    });
-    const oldStatus = existing?.status ?? null;
-
-    if (isNewlyAvailable(oldStatus, newStatus)) {
+    const { change } = await detectSlotTransition(
+      court.venueId,
+      { date, time, court: courtLabel, status: newStatus, price: values.price ?? undefined },
+      { venue: court.venueSlug, venueName: court.venueName }
+    );
+    if (change) {
       transitions++;
-      changes.push({
-        venue: court.venueSlug,
-        venueName: court.venueName,
-        date,
-        time,
-        court: courtLabel,
-        oldStatus,
-        newStatus,
-        price: values.price ?? undefined,
-      });
+      changes.push(change);
     }
 
     if (persist) {
@@ -509,13 +453,7 @@ export async function pollSlots(
   }
 
   if (persist) {
-    await db
-      .insert(feedState)
-      .values({ source: "openactive", feed: SLOT_FEED, nextCursor: walk.cursor, lastPolledAt: new Date().toISOString() })
-      .onConflictDoUpdate({
-        target: [feedState.source, feedState.feed],
-        set: { nextCursor: walk.cursor, lastPolledAt: new Date().toISOString() },
-      });
+    await upsertFeedState("openactive", SLOT_FEED, { nextCursor: walk.cursor });
   }
 
   return {
