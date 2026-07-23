@@ -72,7 +72,9 @@ export function buildWatchCandidates(
     const venuesForWatch =
       w.venueId == null ? activeVenueSlugs : ([slugById.get(w.venueId)].filter(Boolean) as string[]);
     for (const date of dates) {
-      const dayName = DAY_NAMES[new Date(date).getDay()];
+      // "YYYY-MM-DD" parses as UTC midnight → read the weekday in UTC so it agrees
+      // with the matcher and doesn't shift a day on a non-UTC host.
+      const dayName = DAY_NAMES[new Date(date).getUTCDay()];
       const times = watchPreferredTimes(w, dayName);
       for (const slug of venuesForWatch) {
         for (const time of times) {

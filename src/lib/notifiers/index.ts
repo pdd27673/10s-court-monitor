@@ -25,9 +25,10 @@ function matchesWatch(
     if (changeVenueId !== watch.venueId) return false;
   }
 
-  // Check day of week and time preferences
-  const date = new Date(change.date);
-  const dayName = DAY_NAMES[date.getDay()]; // 0 = Sunday … 6 = Saturday
+  // Check day of week and time preferences. `change.date` is a bare "YYYY-MM-DD",
+  // which JS parses as UTC midnight — so read the weekday in UTC too, else a
+  // non-UTC server would shift it by a day near the boundary.
+  const dayName = DAY_NAMES[new Date(change.date).getUTCDay()]; // 0 = Sunday … 6 = Saturday
 
   // Shared with the reconcile/pending planner so matching and targeting never
   // drift; dayTimes-first with legacy weekday/weekend fallback, [] on bad JSON.
@@ -112,67 +113,57 @@ export async function notifyUsers(changes: SlotChange[]) {
     });
 
     for (const channel of channels) {
-      // Filter out slots already notified via this channel (dedup)
-      const notifiedSlots: SlotChange[] = [];
-
-      for (const change of allMatchingChanges) {
-        const slotKey = slotKeyOf(change);
-
-        const existing = await db.query.notificationLog.findFirst({
-          where: and(
-            eq(notificationLog.channelId, channel.id),
-            eq(notificationLog.slotKey, slotKey)
-          ),
-        });
-
-        if (!existing) {
-          notifiedSlots.push(change);
-        }
+      // Skip unsupported channels BEFORE claiming so we never mark a slot notified
+      // on a channel we can't actually send to.
+      if (channel.type !== "telegram" && channel.type !== "email") {
+        console.error(
+          `Unsupported notification channel type: ${channel.type} for user ${userId}. ` +
+          `Channel ID: ${channel.id}. Notification not sent.`
+        );
+        continue;
       }
 
-      if (notifiedSlots.length === 0) continue;
+      // CLAIM each not-yet-notified slot atomically: insert the notification_log
+      // row up front with ON CONFLICT DO NOTHING. The unique(channelId, slotKey)
+      // makes the claim the dedup gate, so a concurrent worker/cron/instance that
+      // already claimed a slot loses the race here (returns no row) and we don't
+      // double-send — closing the old check-then-send-then-insert window.
+      const claimed: SlotChange[] = [];
+      for (const change of allMatchingChanges) {
+        const inserted = await db
+          .insert(notificationLog)
+          .values({ userId, channelId: channel.id, slotKey: slotKeyOf(change) })
+          .onConflictDoNothing({ target: [notificationLog.channelId, notificationLog.slotKey] })
+          .returning({ id: notificationLog.id });
+        if (inserted.length > 0) claimed.push(change);
+      }
+
+      if (claimed.length === 0) continue;
 
       try {
-        let notificationSent = false;
-
         if (channel.type === "telegram") {
-          const message = formatSlotChangesForTelegram(notifiedSlots);
-          await sendTelegramMessage(channel.destination, message);
-          notificationSent = true;
-        } else if (channel.type === "email") {
-          const { subject, html } = formatSlotChangesForEmail(notifiedSlots);
-          await sendEmail(channel.destination, subject, html);
-          notificationSent = true;
+          await sendTelegramMessage(channel.destination, formatSlotChangesForTelegram(claimed));
         } else {
-          // Unsupported channel type (e.g., whatsapp)
-          console.error(
-            `Unsupported notification channel type: ${channel.type} for user ${userId}. ` +
-            `Channel ID: ${channel.id}. Notification not sent.`
-          );
-          continue;
+          const { subject, html } = formatSlotChangesForEmail(claimed);
+          await sendEmail(channel.destination, subject, html);
         }
-
-        // Only log notifications if they were actually sent
-        if (notificationSent) {
-          for (const change of notifiedSlots) {
-            const slotKey = slotKeyOf(change);
-            await db.insert(notificationLog).values({
-              userId,
-              channelId: channel.id,
-              slotKey,
-            });
-          }
-
-          console.log(
-            `Notified user ${userId} via ${channel.type}: ${notifiedSlots.length} slot(s) bundled`
-          );
-        }
-      } catch (error) {
-        console.error(
-          `Failed to notify user ${userId} via ${channel.type}:`,
-          error
+        console.log(
+          `Notified user ${userId} via ${channel.type}: ${claimed.length} slot(s) bundled`
         );
-        // Don't log as sent if there was an error
+      } catch (error) {
+        // Send failed — RELEASE the claims so a later tick retries them (the send
+        // is a single bundle, so it's all-or-nothing).
+        for (const change of claimed) {
+          await db
+            .delete(notificationLog)
+            .where(
+              and(
+                eq(notificationLog.channelId, channel.id),
+                eq(notificationLog.slotKey, slotKeyOf(change))
+              )
+            );
+        }
+        console.error(`Failed to notify user ${userId} via ${channel.type}:`, error);
       }
     }
   }

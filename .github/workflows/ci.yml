@@ -51,7 +51,7 @@ jobs:
       - name: Coverage summary
         if: always()
         run: |
-          node -e "const s=require('./coverage/coverage-summary.json').total; let o='### Coverage (src/lib)\n\n| metric | % | covered/total |\n|---|---|---|\n'; for (const k of ['lines','statements','functions','branches']) o+='| '+k+' | '+s[k].pct+'% | '+s[k].covered+'/'+s[k].total+' |\n'; require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, o);"
+          node -e "const fs=require('fs'); const f='./coverage/coverage-summary.json'; if(!fs.existsSync(f)){console.log('no coverage summary (tests did not produce one) — skipping'); process.exit(0);} const s=require(f).total; let o='### Coverage (src/lib)\n\n| metric | % | covered/total |\n|---|---|---|\n'; for (const k of ['lines','statements','functions','branches']) o+='| '+k+' | '+s[k].pct+'% | '+s[k].covered+'/'+s[k].total+' |\n'; fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, o);"
 
       - name: Upload coverage report
         if: always()
