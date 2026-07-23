@@ -46,6 +46,14 @@ export function SiteNav({ userEmail, isAdmin, activeTab, onTabChange, isGuest }:
           <span className="font-[family-name:var(--font-bricolage)] font-bold text-sm tracking-tight text-[var(--text)]">TFT</span>
         </Link>
 
+        {/* Map link — always available (venue locations, no auth needed) */}
+        <Link
+          href="/map"
+          className="hidden sm:block px-2.5 py-1.5 rounded-lg text-sm text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-all duration-150 shrink-0"
+        >
+          Map
+        </Link>
+
         {/* Center nav — only on dashboard for authenticated */}
         {isDashboard && !isGuest && userEmail && (
           <nav className="hidden sm:flex items-center gap-1 flex-1 justify-center">
