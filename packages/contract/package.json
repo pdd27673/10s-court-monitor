@@ -1,6 +1,6 @@
 {
   "name": "@pdd27673/10s-contract",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "REST API contract for 10s-court-monitor (shared with 10s-mobile)",
   "license": "UNLICENSED",
   "type": "module",

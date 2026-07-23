@@ -22,11 +22,26 @@ export type VenueSummary = {
   name: string;
 };
 
-/** Full venue as returned by GET /api/venues (scraper config). */
+/** Full venue as returned by GET /api/venues.
+ *
+ * Since 0.2.0 the API sources venues from the database (feed-enriched) rather than
+ * the static scraper config, so the metadata/geo fields below are populated when
+ * known. All are optional and additive — 0.1.0 clients keep compiling. `lat`/`lng`
+ * (+`address`,`amenities`,`bookingUrl`) drive the map view. */
 export type Venue = VenueSummary & {
   type: VenueType;
   clubsparkId?: string;
   clubsparkHost?: string;
+  // ---- 0.2.0 additive metadata + geo (optional) ----
+  operator?: string | null;
+  address?: string | null;
+  postcode?: string | null;
+  amenities?: string[] | null;
+  /** Booking deep-link template; `{date}` (YYYY-MM-DD) is substituted by clients. */
+  bookingUrl?: string | null;
+  active?: boolean;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 export type AvailabilitySlot = {
@@ -36,6 +51,15 @@ export type AvailabilitySlot = {
   court: string;
   status: SlotStatus;
   price?: string | null;
+  // ---- 0.2.0 additive normalized-time + booking fields (optional) ----
+  /** ISO 8601 slot start (venue-local wall clock encodes the offset). */
+  startsAt?: string | null;
+  /** ISO 8601 slot end. */
+  endsAt?: string | null;
+  /** RPDE remaining uses (>0 = bookable); null for scraper-sourced rows. */
+  remainingUses?: number | null;
+  /** Resolved booking deep-link for this specific slot, when known. */
+  bookingUrl?: string | null;
 };
 
 export type Watch = {
@@ -84,6 +108,14 @@ export type PatchWatchInput = {
 export type CreateChannelInput = {
   type: ChannelType | string;
   destination: string;
+};
+
+/** Register a mobile device for Expo push (0.2.0 forward-hook — typed so
+ * 10s-mobile can wire against it; the server notifier branch is not built yet). */
+export type RegisterPushInput = {
+  /** Expo push token, e.g. "ExponentPushToken[xxxxxxxx]". */
+  expoPushToken: string;
+  platform?: "ios" | "android";
 };
 
 export type UpdateChannelInput = {

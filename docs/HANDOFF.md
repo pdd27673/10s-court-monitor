@@ -119,7 +119,12 @@ The live tick (`runFeedIngest` in `api/cron/scrape/route.ts`), all writers `pers
 - **`slots.start_minute` populated** on every writer (feed from ISO wall-clock, ClubSpark/scraper from the label). `slots.time` intentionally stays the am/pm join label.
 - **`watches.dayTimes` = canonical HH:MM** — watch APIs normalise on write (accept either form); dashboard hydrates HH:MM→am/pm for its picker; contract `DayTimes` documents HH:MM. Web still shows am/pm.
 - **Migration** `npm run db:migrate-daytimes [--dry-run]` — idempotent cleanup (matching already format-agnostic, so no flag-day). Gates green (152 tests, typecheck+contract, lint, build). **Ops remaining:** run the migration on staging + prod.
-**Phase 7 — contract 0.2.0 + website wiring + map** (lat/lng markers, bbox query) + expanded venue list. Note: `DayTimes`→HH:MM (the contract's time-format piece) already landed in Phase 6.
+**Phase 7 — contract 0.2.0 + website + map: BACKBONE DONE (2026-07-23), map pending.**
+- **Contract 0.2.0** (`packages/contract`) — additive optional fields: `Venue` += operator/address/postcode/amenities/bookingUrl/active/lat/lng; `AvailabilitySlot` += startsAt/endsAt/remainingUses/bookingUrl; new `RegisterPushInput` (expo-push forward-hook). Version bumped 0.1.0→0.2.0. **Publish is ops:** push a `contract-v0.2.0` git tag → `publish-contract.yml` publishes to GitHub Packages.
+- **`/api/venues`** now reads DB venues (feed-enriched: geo/address/amenities/operator/bookingUrl/active), merging clubspark id/host from `constants` by slug; falls back to static config if the DB is empty. Resolves the code-vs-DB split.
+- **`/api/availability`** emits the new per-slot fields (startsAt/endsAt/remainingUses/bookingUrl), additive.
+- Gates green (152 tests, typecheck + contract, lint, build).
+- **Remaining:** the **map view** (lat/lng markers + bbox query; needs a map-lib + CSP decision — `next.config.ts` connect/img-src currently self-only) and the **expanded venue list** UI. Map lib/scope is the open decision.
 
 **Also tracked:** `abbotts-park` stale row (delete after confirming empty). `.runbook.md` committed secrets (rotate + remove).
 

@@ -82,6 +82,12 @@ export async function GET(request: Request) {
         court: s.court,
         status: s.status as AvailabilityResponse["slots"][number]["status"],
         price: s.price,
+        // 0.2.0 additive: normalized time + booking fields (null for rows a
+        // source didn't provide, e.g. scraper rows have no remainingUses).
+        startsAt: s.startsAt ? new Date(s.startsAt).toISOString() : null,
+        endsAt: s.endsAt ? new Date(s.endsAt).toISOString() : null,
+        remainingUses: s.remainingUses,
+        bookingUrl: s.bookingUrl,
       };
     }),
     lastUpdated: mostRecentSlot?.updatedAt || null,
