@@ -47,20 +47,17 @@ async function tick(): Promise<void> {
 async function main(): Promise<void> {
   console.log(`worker: starting — tick every ${TICK_SECONDS}s`);
 
-  // Run once immediately so a deploy starts ingesting without waiting a full interval.
-  await tick();
-
-  const timer = setInterval(() => {
-    if (!stopping) void tick();
-  }, TICK_SECONDS * 1000);
+  const timerRef: { current?: NodeJS.Timeout } = {};
 
   // Graceful shutdown: stop scheduling, let any in-flight tick drain, then exit.
-  // Railway sends SIGTERM on redeploy/stop.
+  // Railway sends SIGTERM on redeploy/stop. Registered BEFORE the first tick so a
+  // SIGTERM during the initial (possibly multi-minute) backfill still drains
+  // gracefully instead of hard-killing the process.
   const shutdown = (signal: string): void => {
     if (stopping) return;
     stopping = true;
     console.log(`worker: ${signal} received — draining in-flight tick then exiting`);
-    clearInterval(timer);
+    if (timerRef.current) clearInterval(timerRef.current);
     const drain = setInterval(() => {
       if (!ticking) {
         clearInterval(drain);
@@ -74,9 +71,16 @@ async function main(): Promise<void> {
       process.exit(0);
     }, 30_000).unref();
   };
-
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
+
+  // Run once immediately so a deploy starts ingesting without waiting a full interval.
+  await tick();
+  if (stopping) return; // a shutdown signal arrived during the first tick
+
+  timerRef.current = setInterval(() => {
+    if (!stopping) void tick();
+  }, TICK_SECONDS * 1000);
 }
 
 main().catch((error) => {

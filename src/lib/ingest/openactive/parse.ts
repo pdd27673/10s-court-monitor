@@ -3,6 +3,7 @@
  * (availability) payloads, plus the Greater London filter that keeps ingestion
  * scoped to London while remaining fully data-driven (no hardcoded venue list).
  */
+import { minutesFromIso, minutesToLabel } from "../../time";
 
 // --- Greater London bounding box (approx). Keeps the national feed London-only. ---
 export const LONDON_BBOX = { minLat: 51.28, maxLat: 51.70, minLng: -0.53, maxLng: 0.34 };
@@ -58,17 +59,15 @@ export function localDate(iso: string): string {
   return iso.slice(0, 10);
 }
 
-/** Scraper-style hour label from an ISO string's wall-clock hour:
- * "2026-07-12T17:00:00+01:00" -> "5pm". Matches the labels the HTML scraper
- * stores ("7am", "12pm", "8pm") so feed + scraper rows share a key. */
+/** Scraper-style time label from an ISO string's wall clock:
+ * "2026-07-12T17:00:00+01:00" -> "5pm". Whole hours match the labels the HTML
+ * scraper stores ("7am", "12pm", "8pm") so feed + scraper rows share a key.
+ * Minute-precise (":30" is kept as "5:30pm") so a half-hour slot doesn't collapse
+ * onto the top-of-hour row under the (venue,date,time,court) unique key or mismatch
+ * an "HH:MM" watch — delegates to the canonical `time.ts` helpers. */
 export function hourLabel(iso: string): string | null {
-  const m = /T(\d{2}):/.exec(iso);
-  if (!m) return null;
-  const h = parseInt(m[1], 10);
-  if (h === 0) return "12am";
-  if (h < 12) return `${h}am`;
-  if (h === 12) return "12pm";
-  return `${h - 12}pm`;
+  const mins = minutesFromIso(iso);
+  return mins == null ? null : minutesToLabel(mins);
 }
 
 /** Availability status from an RPDE slot's `remainingUses`: >0 = bookable, else

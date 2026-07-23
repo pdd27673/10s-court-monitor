@@ -9,6 +9,21 @@ import { VENUES } from "@/lib/constants";
 // scraper config. clubsparkId/clubsparkHost aren't stored in the DB, so they're
 // merged in from the static config by slug (used for booking deep-links). Falls
 // back to the static config if the DB has no venues (e.g. a fresh, unseeded env).
+
+/** The `amenities` jsonb is stored by the facility ingest as `{name: boolean}`
+ * (e.g. `{Floodlit:true, Toilets:false}`); the contract exposes the list of
+ * ENABLED amenity names (`string[]`). Convert here, tolerating a plain string[]
+ * (defensive) or null/absent. */
+function amenityNames(raw: unknown): string[] | null {
+  if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string");
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw as Record<string, unknown>)
+      .filter(([, v]) => Boolean(v))
+      .map(([k]) => k);
+  }
+  return null;
+}
+
 export async function GET() {
   const configBySlug = new Map(VENUES.map((v) => [v.slug, v]));
 
@@ -21,7 +36,7 @@ export async function GET() {
   const venues: Venue[] = rows.map((r) => {
     const cfg = configBySlug.get(r.slug);
     const type = (r.sourceType ?? cfg?.type ?? "courtside") as VenueType;
-    const amenities = Array.isArray(r.amenities) ? (r.amenities as string[]) : null;
+    const amenities = amenityNames(r.amenities);
     return {
       slug: r.slug,
       name: r.name,

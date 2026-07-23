@@ -47,6 +47,17 @@ function matchesWatch(
   return true;
 }
 
+/** Stable dedup key for a slot change. Time is normalized to minute-of-day so the
+ * SAME court-hour reported once as "7pm" and later as "19:00" maps to ONE key
+ * (watch matching uses the same `anyToMinutes` normalization); falls back to the
+ * lowercased label if unparseable. Backs both the per-tick value-dedup and the
+ * `notification_log` dedup so neither can be fooled by the time-format migration. */
+function slotKeyOf(c: SlotChange): string {
+  const mins = anyToMinutes(c.time);
+  const timePart = mins == null ? c.time.toLowerCase().trim() : String(mins);
+  return `${c.venue}:${c.date}:${timePart}:${c.court}`;
+}
+
 // Send notifications for slot changes — one bundled notification per user per channel
 export async function notifyUsers(changes: SlotChange[]) {
   if (changes.length === 0) return;
@@ -63,9 +74,11 @@ export async function notifyUsers(changes: SlotChange[]) {
     venueIdMap[v.slug] = v.id;
   }
 
-  // Collect all matching slot changes per user (across ALL their watches).
-  // Using a Map<userId, Set<SlotChange>> so duplicate slots (matched by >1 watch) are deduplicated.
-  const userChanges = new Map<number, Set<SlotChange>>();
+  // Collect all matching slot changes per user (across ALL their watches),
+  // deduplicated by stable slot key. A Map keyed by slotKey collapses the same
+  // court-hour whether it's matched by several watches or emitted by several clocks
+  // in one tick (the old Set<SlotChange> only deduped identical object references).
+  const userChanges = new Map<number, Map<string, SlotChange>>();
 
   for (const watch of activeWatches) {
     if (!watch.userId) continue;
@@ -76,17 +89,19 @@ export async function notifyUsers(changes: SlotChange[]) {
 
     if (matchingChanges.length === 0) continue;
 
-    if (!userChanges.has(watch.userId)) {
-      userChanges.set(watch.userId, new Set());
+    let bucket = userChanges.get(watch.userId);
+    if (!bucket) {
+      bucket = new Map();
+      userChanges.set(watch.userId, bucket);
     }
     for (const change of matchingChanges) {
-      userChanges.get(watch.userId)!.add(change);
+      bucket.set(slotKeyOf(change), change);
     }
   }
 
   // For each user, send ONE notification per channel with all their matched slots bundled
-  for (const [userId, changesSet] of userChanges) {
-    const allMatchingChanges = [...changesSet];
+  for (const [userId, changesMap] of userChanges) {
+    const allMatchingChanges = [...changesMap.values()];
 
     // Get this user's active notification channels
     const channels = await db.query.notificationChannels.findMany({
@@ -101,7 +116,7 @@ export async function notifyUsers(changes: SlotChange[]) {
       const notifiedSlots: SlotChange[] = [];
 
       for (const change of allMatchingChanges) {
-        const slotKey = `${change.venue}:${change.date}:${change.time}:${change.court}`;
+        const slotKey = slotKeyOf(change);
 
         const existing = await db.query.notificationLog.findFirst({
           where: and(
@@ -140,7 +155,7 @@ export async function notifyUsers(changes: SlotChange[]) {
         // Only log notifications if they were actually sent
         if (notificationSent) {
           for (const change of notifiedSlots) {
-            const slotKey = `${change.venue}:${change.date}:${change.time}:${change.court}`;
+            const slotKey = slotKeyOf(change);
             await db.insert(notificationLog).values({
               userId,
               channelId: channel.id,

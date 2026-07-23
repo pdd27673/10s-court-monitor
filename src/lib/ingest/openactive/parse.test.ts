@@ -107,6 +107,8 @@ describe("feed-reference + label helpers", () => {
     expect(hourLabel("2026-07-12T07:00:00+01:00")).toBe("7am");
     expect(hourLabel("2026-07-12T12:00:00+01:00")).toBe("12pm");
     expect(hourLabel("2026-07-12T00:00:00+01:00")).toBe("12am");
+    // Minute-precise: a half-hour slot keeps its minutes (no collision onto "5pm").
+    expect(hourLabel("2026-07-12T17:30:00+01:00")).toBe("5:30pm");
     expect(hourLabel("bad")).toBeNull();
   });
 

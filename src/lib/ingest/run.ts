@@ -237,14 +237,23 @@ export async function runFeedIngest(opts: { force?: boolean } = {}): Promise<voi
 
       // Confirm-on-notify: verify watched feed flips against the live site before
       // alerting (drops false-positives; the site-wins upsert also corrects the
-      // dashboard). Fails safe to direct-notify when the proxy is off.
+      // dashboard). Its OWN try/catch so a confirm failure falls back to notifying
+      // on the raw feed changes rather than dropping this tick's Clock 1
+      // transitions entirely (the feed poll already persisted them).
+      let clockOneChanges = c1.changes;
       if (CONFIRM_ON_NOTIFY && c1.changes.length > 0) {
-        const cf = await confirmFeedChanges(c1.changes, { persist: true });
-        logConfirm(cf);
-        allChanges.push(...cf.changes);
-      } else {
-        allChanges.push(...c1.changes);
+        try {
+          const cf = await confirmFeedChanges(c1.changes, { persist: true });
+          logConfirm(cf);
+          clockOneChanges = cf.changes;
+        } catch (error) {
+          console.error(
+            "confirm-on-notify failed (non-fatal) — notifying on unconfirmed feed changes:",
+            error
+          );
+        }
       }
+      allChanges.push(...clockOneChanges);
     } catch (error) {
       console.error("Clock 1 head-poll failed (non-fatal):", error);
     }
