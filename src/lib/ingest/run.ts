@@ -42,6 +42,15 @@ const SWEEP_INTERVAL_HOURS = parseInt(process.env.SWEEP_INTERVAL_HOURS || "2", 1
 // is off (scrape 404s → pass through). Toggle off with CONFIRM_ON_NOTIFY=off.
 const CONFIRM_ON_NOTIFY = !/^(off|false|0)$/i.test(process.env.CONFIRM_ON_NOTIFY ?? "on");
 
+// Self-heal floor. When Clock 1 sees a slot for a venue we track whose court
+// isn't seeded, it re-runs the facility ingest and retries those slots in the
+// same tick. That's a full facility-feed walk, so it's throttled: a court the
+// facility feed genuinely never lists is a PERMANENT gap, and without a floor it
+// would trigger a walk on every tick forever. The floor costs nothing in the case
+// that matters — a genuinely new court heals on the first tick that sees it,
+// since the throttle only bites on repeat attempts inside the window.
+const FACILITY_HEAL_MIN_MINUTES = parseInt(process.env.FACILITY_HEAL_MIN_MINUTES || "60", 10);
+
 // ClubSpark (Newham) is a full-snapshot JSON poll, not an RPDE delta feed — one
 // call per venue covers the whole window, so a modest cadence stays polite while
 // beating the retired scraper's ~10-min cron.
@@ -57,8 +66,12 @@ const CLEANUP_INTERVAL_HOURS = parseInt(process.env.CLEANUP_INTERVAL_HOURS || "6
  * facility feed, throttled to once per FACILITY_REFRESH_HOURS. Failure-isolated:
  * a feed hiccup logs and returns — it never breaks the ingest cycle. Populating
  * `courts` is also the prereq for slot→court resolution in the slot clocks.
+ *
+ * Returns whether the ingest actually ran to completion — the Clock 1 self-heal
+ * needs to know, since it only reloads its court index (and retries the slots it
+ * couldn't place) when the table has genuinely been refreshed.
  */
-async function maybeIngestFacilities(force = false) {
+async function maybeIngestFacilities(force = false): Promise<boolean> {
   try {
     if (!force) {
       const [state] = await db
@@ -71,7 +84,7 @@ async function maybeIngestFacilities(force = false) {
         const ageMs = Date.now() - new Date(state.lastPolledAt).getTime();
         if (ageMs < FACILITY_REFRESH_HOURS * 3600_000) {
           console.log(`Facility refresh skipped (last run ${(ageMs / 3600_000).toFixed(1)}h ago)`);
-          return;
+          return false;
         }
       }
     }
@@ -82,8 +95,10 @@ async function maybeIngestFacilities(force = false) {
         `${summary.londonVenues} London venues (${summary.venuesInserted} new, ` +
         `${summary.venuesUpdated} updated), ${summary.courtsUpserted} courts`
     );
+    return true;
   } catch (error) {
     console.error("Facility ingest failed (non-fatal):", error);
+    return false;
   }
 }
 
@@ -175,7 +190,9 @@ function logConfirm(cf: ConfirmSummary): void {
 /**
  * Feed-primary ingestion in one tick. See the module header for the invariants.
  *   Clock 1  — OpenActive feed head-poll, every tick (cheap at head). Instant
- *              notifications for the ~95% the feed reports correctly.
+ *              notifications for the ~95% the feed reports correctly. Self-heals
+ *              slots whose court isn't seeded yet by re-running the facility
+ *              ingest (throttled) and retrying them in the same tick.
  *   confirm  — confirm-on-notify: scrape the venue-day of each watched feed flip
  *              to drop false-positive alerts (per-transition cost; opt-out flag).
  *   ClubSpark — Newham first-party snapshot poll, throttled (already truth).
@@ -199,13 +216,36 @@ export async function runFeedIngest(opts: { force?: boolean } = {}): Promise<voi
     await ensureVenuesExist();
     // Keep venues/courts/geo fresh (throttled unless forced, failure-isolated).
     // Also the prereq that populates `courts` so slot→court resolution works.
-    await maybeIngestFacilities(force);
+    const facilitiesFreshThisTick = await maybeIngestFacilities(force);
 
     const allChanges: SlotChange[] = [];
 
     // Clock 1 — feed head-poll (delta). Runs every tick; near-free at head.
     try {
-      const c1 = await pollSlots({ persist: true });
+      // Self-heal hook: Clock 1 buffers slots whose court isn't seeded (at a venue
+      // we DO track) and calls this once, then retries them against a reloaded
+      // court index — so a court the facility feed added since our last refresh
+      // costs us nothing rather than a silently-missed notification. Throttled
+      // here (policy) because the walk is expensive; the retry itself lives in
+      // pollSlots (mechanism). Returning false means "not refreshed, don't retry".
+      const healUnmapped = async (): Promise<boolean> => {
+        if (facilitiesFreshThisTick) {
+          // The refresh above already ran a full walk moments ago; re-walking it
+          // cannot seed a court the feed just declined to list.
+          console.log("   ⚕️  unmapped court(s) seen, but facilities were already re-ingested this tick");
+          return false;
+        }
+        if (!(await clockDue("facility-heal", FACILITY_HEAL_MIN_MINUTES * 60_000))) {
+          console.log("   ⚕️  unmapped court(s) seen — self-heal throttled, skipping facility re-ingest");
+          return false;
+        }
+        console.log("   ⚕️  unmapped court(s) seen — re-running facility ingest to self-heal");
+        const ok = await maybeIngestFacilities(true);
+        if (ok) await stampClock("facility-heal");
+        return ok;
+      };
+
+      const c1 = await pollSlots({ persist: true, healUnmapped });
       const mode = c1.startedFromHead ? "delta from head" : "INITIAL BACKFILL — notifies nothing";
       console.log(
         `Clock 1 OpenActive head-poll (${mode}): ${c1.pages} pages walked, ` +
@@ -219,16 +259,27 @@ export async function runFeedIngest(opts: { force?: boolean } = {}): Promise<voi
       }
       // Break down the "unresolved" count so a benign national-feed miss (other
       // operators/regions we don't seed) reads differently from a real seeding gap.
+      // Counts are POST-heal: anything still in `unmappedCourt` survived a facility
+      // re-ingest, so the ⚠️ below means a genuine gap rather than stale seeding.
+      if (c1.healedResolved > 0) {
+        console.log(
+          `   ⚕️  self-heal: facility re-ingest mapped ${c1.healedResolved} previously-unmapped slot(s)`
+        );
+      }
       if (c1.unresolved > 0) {
         const u = c1.unresolvedBy;
         console.log(
           `   unresolved ${c1.unresolved}: ${u.foreign} foreign (other operators/regions), ` +
-            `${u.unmappedCourt} tracked-venue court unmapped, ${u.noTime} no-time, ${u.badData} bad-data`
+            `${u.unmappedCourt} tracked-venue court unmapped, ` +
+            `${u.excludedNonTennis} non-tennis (excluded on purpose), ` +
+            `${u.noTime} no-time, ${u.badData} bad-data`
         );
         if (u.unmappedCourt > 0) {
           console.warn(
-            `   ⚠️  ${u.unmappedCourt} slot(s) belonged to a venue we track but had no seeded court — ` +
-              `re-run facility ingest / verify court @ids`
+            `   ⚠️  ${u.unmappedCourt} slot(s) belonged to a venue we track but had no seeded court` +
+              (c1.healed
+                ? " — still missing after a facility re-ingest, so the facility feed likely never lists these court @ids"
+                : " — no re-ingest ran this tick; retrying after the next facility refresh")
           );
         }
       }

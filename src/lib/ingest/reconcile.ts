@@ -270,10 +270,14 @@ async function loadCourtsideVenueIndex(): Promise<Map<string, CourtsideVenue>> {
 
   const courtsByVenue = new Map<number, Map<number, { courtId: number; name: string | null }>>();
   if (ids.length) {
+    // Exclude flagged non-tennis courts. They're seeded (so feed slot resolution
+    // can tell "deliberately excluded" from "unmapped"), but this index is keyed
+    // by court NUMBER and last-write-wins — an unfiltered "Padel Court 1" would
+    // hijack the canonical label and courtId of the tennis "Court 1".
     const cs = await db
       .select({ venueId: courts.venueId, id: courts.id, name: courts.name })
       .from(courts)
-      .where(inArray(courts.venueId, ids));
+      .where(and(inArray(courts.venueId, ids), eq(courts.nonTennis, 0)));
     for (const c of cs) {
       const n = courtNumberFromName(c.name);
       if (n == null) continue;

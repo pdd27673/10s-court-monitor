@@ -91,6 +91,11 @@ export function isNewlyAvailable(oldStatus: string | null, newStatus: string): b
 export interface ParsedCourt {
   externalId: string; // individual-facility-use @id
   name: string | null;
+  /** Seed-but-flag: the court is stored so slot resolution can recognise it as
+   * deliberately excluded rather than a tennis court we forgot to seed — only
+   * the latter is a real ingest gap worth alerting on. Flagged courts never
+   * produce slots. */
+  nonTennis: boolean;
 }
 
 export interface ParsedVenue {
@@ -154,18 +159,23 @@ export function parseFacilityUse(data: RawFacilityUse): ParsedVenue | null {
     }, {}) ?? null;
 
   const rawCourts = (data.individualFacilityUse ?? []).filter((c) => c["@id"]);
-  // Drop non-tennis courts (padel, cricket nets …) so they never reach the
-  // `courts` table — the slot ingest resolves feed slots against that table, so
-  // a padel court filtered out here can't leak its slots into the feed.
-  const courts: ParsedCourt[] = rawCourts
-    .filter((c) => !isNonTennisName(c.name))
-    .map((c) => ({ externalId: c["@id"] as string, name: c.name ?? null }));
+  // Keep every court, flagging the non-tennis ones (padel, cricket nets …)
+  // rather than dropping them. A dropped court is indistinguishable downstream
+  // from a tennis court we never seeded, so an unresolved slot couldn't tell a
+  // deliberate exclusion from a real ingest gap; the flag makes that difference
+  // explicit while still blocking slots for those courts.
+  const courts: ParsedCourt[] = rawCourts.map((c) => ({
+    externalId: c["@id"] as string,
+    name: c.name ?? null,
+    nonTennis: isNonTennisName(c.name),
+  }));
 
   // Skip the whole facility when it's non-tennis: either the venue itself is
   // named for another sport (a dedicated padel club), or every court it listed
-  // was non-tennis. A metadata-only facility (no court list) is left alone —
-  // those are existing tennis venues we enrich, not new non-tennis ones.
-  if (isNonTennisName(name) || (rawCourts.length > 0 && courts.length === 0)) {
+  // was flagged non-tennis. There's nothing to monitor at such a venue, so it
+  // isn't worth a row at all. A metadata-only facility (no court list) is left
+  // alone — those are existing tennis venues we enrich, not new non-tennis ones.
+  if (isNonTennisName(name) || (courts.length > 0 && courts.every((c) => c.nonTennis))) {
     return null;
   }
 

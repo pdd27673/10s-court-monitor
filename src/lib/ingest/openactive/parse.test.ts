@@ -84,7 +84,7 @@ describe("parseFacilityUse", () => {
     expect(v.courts).toHaveLength(1);
   });
 
-  it("drops padel courts but keeps the tennis courts of a mixed venue", () => {
+  it("keeps every court of a mixed venue, flagging the padel one as non-tennis", () => {
     const v = parseFacilityUse({
       "@id": "https://api.premiertennis.co.uk/openactive/feed/facility-uses/900",
       identifier: "900",
@@ -96,21 +96,45 @@ describe("parseFacilityUse", () => {
       ],
       location: { name: "Mixed Park", geo: { latitude: 51.5, longitude: -0.1 } },
     })!;
-    expect(v.courts.map((c) => c.name)).toEqual(["Court 1", "Court 2"]);
+    // Seeded, not dropped: the padel court stays so slot resolution can tell a
+    // deliberate exclusion from a court we forgot to seed.
+    expect(v.courts.map((c) => [c.name, c.nonTennis])).toEqual([
+      ["Court 1", false],
+      ["Padel Court 1", true],
+      ["Court 2", false],
+    ]);
+  });
+
+  it("flags every court of a normal tennis facility as tennis", () => {
+    const v = parseFacilityUse(FACILITY_TH)!;
+    expect(v.courts.map((c) => c.nonTennis)).toEqual([false, false]);
   });
 
   it("skips a facility whose courts are all non-tennis", () => {
     const v = parseFacilityUse({
       "@id": ".../facility-uses/901",
       identifier: "901",
-      name: "Tennis courts at Padel Only",
+      // Innocuous venue name, so this exercises the all-courts-flagged skip
+      // rather than the non-tennis-venue-name skip below.
+      name: "Tennis courts at Riverside Sports",
       individualFacilityUse: [
         { "@id": ".../901/individual-facility-uses/1", name: "Padel Court 1" },
         { "@id": ".../901/individual-facility-uses/2", name: "Padel Court 2" },
       ],
-      location: { name: "Padel Only", geo: { latitude: 51.5, longitude: -0.1 } },
+      location: { name: "Riverside Sports", geo: { latitude: 51.5, longitude: -0.1 } },
     });
     expect(v).toBeNull();
+  });
+
+  it("keeps a metadata-only facility with no court list", () => {
+    const v = parseFacilityUse({
+      "@id": ".../facility-uses/903",
+      identifier: "903",
+      name: "Tennis courts at Meta Park",
+      location: { name: "Meta Park", geo: { latitude: 51.5, longitude: -0.1 } },
+    });
+    expect(v).not.toBeNull(); // enrichment of an existing tennis venue, not a skip
+    expect(v!.courts).toEqual([]);
   });
 
   it("skips a facility named for a non-tennis sport", () => {

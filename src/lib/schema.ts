@@ -72,6 +72,11 @@ export const courts = pgTable(
       .notNull(),
     externalId: text("external_id"), // individual-facility-use @id (stable court identity)
     name: text("name"),
+    // Seeded-but-excluded marker. Non-tennis courts (padel, cricket nets …) at a
+    // venue we DO track are stored rather than dropped, so slot resolution can
+    // tell "deliberately excluded" apart from "court we forgot to seed" — the
+    // latter is a real gap worth alerting on. Flagged courts never produce slots.
+    nonTennis: integer("non_tennis").notNull().default(0),
   },
   (table) => ({
     uniqueCourt: unique().on(table.venueId, table.externalId),

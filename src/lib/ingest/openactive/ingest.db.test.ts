@@ -73,6 +73,9 @@ const slotItem = (opts: { remainingUses: number; court?: string; id?: number }) 
   },
 });
 
+const PADEL_COURT_EXT = `${BASE}/facility-uses/900/individual-facility-uses/7`;
+const UNSEEDED_COURT_EXT = `${BASE}/facility-uses/900/individual-facility-uses/2`;
+
 async function seedVenueAndCourt() {
   const [v] = await testDb()
     .insert(venues)
@@ -80,6 +83,14 @@ async function seedVenueAndCourt() {
     .returning({ id: venues.id });
   await testDb().insert(courts).values({ venueId: v.id, externalId: COURT_EXT, name: "Court 1" });
   return v.id;
+}
+
+/** Seeded-but-flagged court at the SAME tracked facility — the padel case that
+ * used to be dropped at parse time and misread as an unmapped tennis court. */
+async function seedPadelCourt(venueId: number) {
+  await testDb()
+    .insert(courts)
+    .values({ venueId, externalId: PADEL_COURT_EXT, name: "Padel Court 1", nonTennis: 1 });
 }
 
 beforeAll(initTestDb);
@@ -167,10 +178,47 @@ describe("ingestSlots (DB)", () => {
   it("flags a slot for a TRACKED facility whose court @id isn't seeded as unmappedCourt", async () => {
     await seedVenueAndCourt(); // seeds facility 900, court .../900/individual-facility-uses/1
     // same facility 900 (we track it) but court #2 was never seeded → real gap
-    walkState.items = [slotItem({ remainingUses: 1, court: `${BASE}/facility-uses/900/individual-facility-uses/2` })];
+    walkState.items = [slotItem({ remainingUses: 1, court: UNSEEDED_COURT_EXT })];
     const s = await ingestSlots({ persist: true, paceMs: 0 });
     expect(s.resolved).toBe(0);
-    expect(s.unresolvedBy).toMatchObject({ foreign: 0, unmappedCourt: 1 });
+    expect(s.unresolvedBy).toMatchObject({ foreign: 0, unmappedCourt: 1, excludedNonTennis: 0 });
+  });
+
+  it("counts a seeded-but-flagged (non-tennis) court as excludedNonTennis, not unmappedCourt, and writes no row", async () => {
+    const vid = await seedVenueAndCourt();
+    await seedPadelCourt(vid);
+    walkState.items = [slotItem({ remainingUses: 1, court: PADEL_COURT_EXT })];
+
+    const s = await ingestSlots({ persist: true, paceMs: 0 });
+    expect(s.resolved).toBe(0);
+    expect(s.unresolved).toBe(1);
+    expect(s.unresolvedBy).toMatchObject({ excludedNonTennis: 1, unmappedCourt: 0, foreign: 0 });
+    expect(s.slotsUpserted).toBe(0);
+    expect(await testDb().select().from(slots)).toHaveLength(0);
+  });
+});
+
+describe("ingestFacilities — non-tennis flag persistence", () => {
+  it("re-flags a court seeded before the guard existed (update path)", async () => {
+    const [v] = await testDb()
+      .insert(venues)
+      .values({ slug: "test-park-900", name: "Test Park 900", sourceType: "courtside" })
+      .returning({ id: venues.id });
+    // Pre-existing unflagged padel row, as a pre-guard ingest would have left it.
+    await testDb()
+      .insert(courts)
+      .values({ venueId: v.id, externalId: PADEL_COURT_EXT, name: "Padel Court 1", nonTennis: 0 });
+
+    const item = facilityItem({ lat: 51.5, lng: -0.1 });
+    item.data.individualFacilityUse.push({ "@id": PADEL_COURT_EXT, name: "Padel Court 1" });
+    walkState.items = [item];
+
+    await ingestFacilities({ paceMs: 0 });
+
+    const padel = await testDb().select().from(courts).where(eq(courts.externalId, PADEL_COURT_EXT));
+    expect(padel[0].nonTennis).toBe(1);
+    const tennis = await testDb().select().from(courts).where(eq(courts.externalId, COURT_EXT));
+    expect(tennis[0].nonTennis).toBe(0);
   });
 });
 
@@ -210,5 +258,153 @@ describe("pollSlots (DB) — delta + transition detection", () => {
     const rows = await testDb().select().from(slots).where(eq(slots.venueId, vid));
     expect(rows[0].status).toBe("booked"); // unchanged
     expect(await testDb().select().from(feedState).where(eq(feedState.feed, "individual-facility-use-slots"))).toHaveLength(0);
+  });
+
+  it("a slot for a seeded-but-flagged court is excludedNonTennis: no row, no transition", async () => {
+    const vid = await seedVenueAndCourt();
+    await seedPadelCourt(vid);
+    // A prior booked row would make this a booked→available flip for a tennis
+    // court; the flag must suppress the transition as well as the write.
+    await testDb()
+      .insert(slots)
+      .values({ venueId: vid, date: TODAY, time: "7pm", court: "Padel Court 1", status: "booked" });
+    walkState.items = [slotItem({ remainingUses: 1, court: PADEL_COURT_EXT })];
+
+    const p = await pollSlots({ persist: true, paceMs: 0 });
+    expect(p.resolved).toBe(0);
+    expect(p.unresolved).toBe(1);
+    expect(p.unresolvedBy).toMatchObject({ excludedNonTennis: 1, unmappedCourt: 0, foreign: 0 });
+    expect(p.transitions).toBe(0);
+    expect(p.changes).toHaveLength(0);
+    expect(p.slotsUpserted).toBe(0);
+    expect(p.byVenue).toEqual({});
+
+    const rows = await testDb().select().from(slots).where(eq(slots.venueId, vid));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("booked"); // untouched
+  });
+});
+
+describe("pollSlots (DB) — heal-and-retry for unmapped tracked-venue courts", () => {
+  it("rescues a previously-unmapped slot when healUnmapped seeds the court", async () => {
+    const vid = await seedVenueAndCourt();
+    // Court #2 at the tracked facility 900 is missing → unmappedCourt.
+    walkState.items = [slotItem({ remainingUses: 1, court: UNSEEDED_COURT_EXT })];
+
+    const healUnmapped = vi.fn(async () => {
+      await testDb().insert(courts).values({ venueId: vid, externalId: UNSEEDED_COURT_EXT, name: "Court 2" });
+      return true;
+    });
+
+    const p = await pollSlots({ persist: true, paceMs: 0, healUnmapped });
+    expect(healUnmapped).toHaveBeenCalledTimes(1);
+    expect(p.healed).toBe(true);
+    expect(p.healedResolved).toBe(1);
+    expect(p.resolved).toBe(1);
+    expect(p.unresolved).toBe(0);
+    expect(p.unresolvedBy).toMatchObject({ unmappedCourt: 0, foreign: 0, excludedNonTennis: 0 });
+    expect(p.slotsUpserted).toBe(1);
+    expect(p.byVenue).toEqual({ "test-park": 1 });
+
+    const rows = await testDb().select().from(slots).where(eq(slots.court, "Court 2"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ venueId: vid, date: TODAY, time: "7pm", status: "available" });
+  });
+
+  it("a healed slot still notifies: booked→available flip is detected on the retry pass", async () => {
+    const vid = await seedVenueAndCourt();
+    // Prior booked row for the not-yet-seeded court, so the rescue is a flip.
+    await testDb()
+      .insert(slots)
+      .values({ venueId: vid, date: TODAY, time: "7pm", court: "Court 2", status: "booked" });
+    walkState.items = [slotItem({ remainingUses: 1, court: UNSEEDED_COURT_EXT })];
+
+    const p = await pollSlots({
+      persist: true,
+      paceMs: 0,
+      healUnmapped: async () => {
+        await testDb().insert(courts).values({ venueId: vid, externalId: UNSEEDED_COURT_EXT, name: "Court 2" });
+        return true;
+      },
+    });
+    expect(p.healedResolved).toBe(1);
+    expect(p.transitions).toBe(1);
+    expect(p.changes[0]).toMatchObject({ court: "Court 2", oldStatus: "booked", newStatus: "available" });
+  });
+
+  it("a heal that seeds the court FLAGGED moves it to excludedNonTennis, not resolved", async () => {
+    const vid = await seedVenueAndCourt();
+    walkState.items = [slotItem({ remainingUses: 1, court: PADEL_COURT_EXT })];
+
+    const p = await pollSlots({
+      persist: true,
+      paceMs: 0,
+      healUnmapped: async () => {
+        await seedPadelCourt(vid);
+        return true;
+      },
+    });
+    expect(p.healed).toBe(true);
+    expect(p.healedResolved).toBe(0);
+    expect(p.resolved).toBe(0);
+    expect(p.unresolved).toBe(1); // still unresolved, just benignly so
+    expect(p.unresolvedBy).toMatchObject({ unmappedCourt: 0, excludedNonTennis: 1 });
+    expect(p.slotsUpserted).toBe(0);
+  });
+
+  it("healUnmapped returning false (throttled) leaves the slot counted as unmappedCourt", async () => {
+    await seedVenueAndCourt();
+    walkState.items = [slotItem({ remainingUses: 1, court: UNSEEDED_COURT_EXT })];
+
+    const healUnmapped = vi.fn(async () => false);
+    const p = await pollSlots({ persist: true, paceMs: 0, healUnmapped });
+    expect(healUnmapped).toHaveBeenCalledTimes(1);
+    expect(p.healed).toBe(false);
+    expect(p.healedResolved).toBe(0);
+    expect(p.unresolved).toBe(1);
+    expect(p.unresolvedBy).toMatchObject({ unmappedCourt: 1 });
+    expect(p.slotsUpserted).toBe(0);
+  });
+
+  it("a throwing healUnmapped doesn't sink the poll; cursor still advances", async () => {
+    await seedVenueAndCourt();
+    walkState.items = [
+      slotItem({ remainingUses: 1 }), // normal slot, must still be processed
+      slotItem({ remainingUses: 1, court: UNSEEDED_COURT_EXT, id: 5001 }),
+    ];
+
+    const p = await pollSlots({
+      persist: true,
+      paceMs: 0,
+      healUnmapped: async () => {
+        throw new Error("facility ingest exploded");
+      },
+    });
+    expect(p.healed).toBe(false);
+    expect(p.healedResolved).toBe(0);
+    expect(p.resolved).toBe(1);
+    expect(p.unresolvedBy).toMatchObject({ unmappedCourt: 1 });
+    expect(p.slotsUpserted).toBe(1);
+
+    const fs = await testDb().select().from(feedState).where(eq(feedState.feed, "individual-facility-use-slots"));
+    expect(fs[0].nextCursor).toBe("HEAD-CURSOR");
+  });
+
+  it("no unmapped slots → the heal hook is never called", async () => {
+    await seedVenueAndCourt();
+    walkState.items = [slotItem({ remainingUses: 1 })];
+    const healUnmapped = vi.fn(async () => true);
+    const p = await pollSlots({ persist: true, paceMs: 0, healUnmapped });
+    expect(healUnmapped).not.toHaveBeenCalled();
+    expect(p.healed).toBe(false);
+  });
+
+  it("a foreign (untracked-facility) slot is never buffered for healing", async () => {
+    await seedVenueAndCourt();
+    walkState.items = [slotItem({ remainingUses: 1, court: `${BASE}/facility-uses/999/individual-facility-uses/9` })];
+    const healUnmapped = vi.fn(async () => true);
+    const p = await pollSlots({ persist: true, paceMs: 0, healUnmapped });
+    expect(healUnmapped).not.toHaveBeenCalled();
+    expect(p.unresolvedBy).toMatchObject({ foreign: 1, unmappedCourt: 0 });
   });
 });

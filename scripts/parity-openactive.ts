@@ -54,6 +54,10 @@ async function main() {
       if (!v || !isGreaterLondon(v.lat, v.lng)) continue;
       londonSlugs.add(v.slug);
       for (const c of v.courts) {
+        // Flagged non-tennis courts are parsed but never monitored, so indexing
+        // them here would compare padel feed availability against tennis-only
+        // scrapes and report the difference as a parity mismatch.
+        if (c.nonTennis) continue;
         courtByRef.set(c.externalId, { slug: v.slug, courtNumber: courtNumberFromName(c.name) });
       }
     }
