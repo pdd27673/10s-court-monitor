@@ -28,7 +28,10 @@ jobs:
         working-directory: packages/contract
         run: |
           VERSION="${GITHUB_REF_NAME#contract-v}"
-          npm version "$VERSION" --no-git-tag-version
+          # package.json is normally already at the tagged version, and plain
+          # `npm version` treats that as an error ("Version not changed"), which
+          # is what stopped contract-v0.1.0 from ever publishing.
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish
         working-directory: packages/contract
