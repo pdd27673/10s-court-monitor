@@ -1,118 +1,16 @@
 import { NextResponse } from "next/server";
-import { runScheduledScrape } from "@/lib/scrape-scheduler";
-import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
-import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
-import { db } from "@/lib/db";
-import { slots, notificationLog, scrapeTargets } from "@/lib/schema";
-import { lt, sql } from "drizzle-orm";
-import { proxyManager, formatBytes } from "@/lib/proxy-manager";
-import type { ScrapeStats } from "@/lib/scraper";
+import { runFeedIngest } from "@/lib/ingest/run";
+
+// HTTP trigger for feed-primary ingestion. Since Phase 5 the ingest loop lives in
+// the standalone worker (`src/lib/ingest/worker.ts`, its own Railway service); this
+// route stays as a manual / fallback trigger an external scheduler can POST. Both
+// call the same `runFeedIngest`, so they run identical logic.
 
 // Protect the cron endpoint with a secret (skip in development)
 const CRON_SECRET = process.env.CRON_SECRET;
 const isDev = process.env.NODE_ENV === "development";
 
-async function runCleanup() {
-  try {
-    console.log("Running cleanup...");
-
-    // Keep data for 7 days (can be configured)
-    const daysToKeep = parseInt(process.env.CLEANUP_DAYS || "7", 10);
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
-    const cutoff = cutoffDate.toISOString().split("T")[0];
-
-    // Delete old slots
-    const deletedSlots = await db.delete(slots).where(lt(slots.date, cutoff)).returning();
-    console.log(`Deleted ${deletedSlots.length} old slots (before ${cutoff})`);
-
-    // Delete old notification logs
-    const deletedLogs = await db.delete(notificationLog).where(lt(notificationLog.sentAt, cutoff)).returning();
-    console.log(`Deleted ${deletedLogs.length} old notification logs`);
-
-    // Vacuum database to reclaim space
-    await db.execute(sql`VACUUM`);
-    console.log("Database vacuumed");
-  } catch (error) {
-    console.error("Cleanup failed:", error);
-  }
-}
-
-async function runScrapeJob(force = false) {
-  try {
-    console.log(`Starting ${force ? "forced full" : "scheduled"} scrape job...`);
-
-    // Ensure all venues exist in DB
-    await ensureVenuesExist();
-
-    // If forced, reset all nextScrapeAt timestamps so every target is due now
-    if (force) {
-      const now = new Date().toISOString();
-      await db.update(scrapeTargets).set({ nextScrapeAt: now });
-      console.log("Force mode: reset all scrape targets to due now");
-    }
-
-    // Reset proxy stats for this run
-    proxyManager.resetStats();
-    const startTime = Date.now();
-
-    // Get configured days ahead (default 8)
-    const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "8", 10);
-
-    // Run scheduled scrape (only scrapes targets that are due)
-    const { slots: allSlots, targetsScraped, targetsSkipped, errors } = await runScheduledScrape(scrapeDays);
-
-    // Build stats for alerting/summary
-    const durationMs = Date.now() - startTime;
-    const proxyStats = proxyManager.getStats();
-    const stats: ScrapeStats = {
-      durationMs,
-      durationFormatted: `${(durationMs / 1000).toFixed(1)}s`,
-      totalRequests: proxyStats.totalRequests,
-      totalBytes: proxyStats.totalBytes,
-      totalBytesFormatted: formatBytes(proxyStats.totalBytes),
-      venuesTotal: targetsScraped + targetsSkipped,
-      venuesSuccess: targetsScraped - errors.length,
-      venuesFailed: errors.length,
-      datesScraped: scrapeDays,
-      slotsScraped: allSlots.length,
-      failedVenues: errors,
-    };
-
-    console.log(`📊 Scrape completed in ${stats.durationFormatted}`);
-    console.log(`   ${targetsScraped} targets scraped, ${targetsSkipped} skipped (not due)`);
-    console.log(`   ${allSlots.length} slots fetched, ${stats.totalBytesFormatted} transferred`);
-
-    // Only send alerts/summaries if we actually scraped something
-    if (targetsScraped > 0) {
-      // Check for high failure rate and alert admin
-      await sendScrapeFailureAlert(stats);
-
-      // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
-      await sendScrapeSummary(stats);
-
-      // Store slots and detect changes
-      const changes = await storeAndDiff(allSlots);
-      console.log(`Detected ${changes.length} newly available slots`);
-
-      // Notify users about changes
-      if (changes.length > 0) {
-        await notifyUsers(changes);
-      }
-    } else {
-      console.log("No targets were due for scraping");
-    }
-
-    // Run cleanup after scraping
-    await runCleanup();
-
-    console.log("Scrape job completed successfully");
-  } catch (error) {
-    console.error("Scrape job failed:", error);
-  }
-}
-
-// Track if a scrape job is currently running to prevent concurrent executions
+// Prevent overlapping runs within this process (the worker has its own guard).
 let isJobRunning = false;
 
 export async function POST(request: Request) {
@@ -130,24 +28,19 @@ export async function POST(request: Request) {
 
   // Check if a job is already running
   if (isJobRunning) {
-    return NextResponse.json({ error: "Scrape job already running" }, { status: 409 });
+    return NextResponse.json({ error: "Ingest job already running" }, { status: 409 });
   }
 
-  const force = new URL(request.url).searchParams.get("force") === "true";
-
-  // Start the scrape job in the background (don't await)
+  // Start the ingest in the background (don't await)
   isJobRunning = true;
-  runScrapeJob(force)
+  runFeedIngest()
     .catch((error) => {
-      console.error("Unhandled error in scrape job:", error);
+      console.error("Unhandled error in ingest job:", error);
     })
     .finally(() => {
       isJobRunning = false;
     });
 
   // Return immediately
-  return NextResponse.json({
-    success: true,
-    message: force ? "Forced full scrape started" : "Scrape job started",
-  });
+  return NextResponse.json({ success: true, message: "Feed ingest started" });
 }

@@ -3,14 +3,21 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getNextNDays, runFullScrape } from "@/lib/scraper";
-import { ensureVenuesExist, storeAndDiff } from "@/lib/differ";
-import { notifyUsers, sendScrapeFailureAlert, sendScrapeSummary } from "@/lib/notifiers";
+import { runFeedIngest } from "@/lib/ingest/run";
+
+/**
+ * Admin "refresh now" trigger. Runs the exact same pipeline as the cron/worker
+ * (`runFeedIngest`) but in `force` mode — bypassing the per-clock throttles so
+ * every availability stage runs immediately. Kept in one place so admin can't
+ * drift from the scheduled path.
+ */
+
+// Prevent overlapping manual runs within this process.
+let isJobRunning = false;
 
 export async function POST() {
   try {
     const session = await auth();
-
     if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -21,39 +28,21 @@ export async function POST() {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Run scrape in background
-    (async () => {
-      try {
-        await ensureVenuesExist();
+    if (isJobRunning) {
+      return NextResponse.json({ error: "Ingest job already running" }, { status: 409 });
+    }
 
-        // Get next N days (configurable via SCRAPE_DAYS env var, default 9)
-        const scrapeDays = parseInt(process.env.SCRAPE_DAYS || "9", 10);
-        const dates = getNextNDays(scrapeDays);
+    // Run the full pipeline unthrottled in the background (don't await).
+    isJobRunning = true;
+    runFeedIngest({ force: true })
+      .catch((error) => console.error("Manual ingest failed:", error))
+      .finally(() => {
+        isJobRunning = false;
+      });
 
-        // Run full scrape with timing and stats
-        const { slots: allSlots, stats } = await runFullScrape(dates);
-
-        // Check for high failure rate and alert admin
-        await sendScrapeFailureAlert(stats);
-
-        // Optionally send scrape summary (if LOG_SCRAPE_SUMMARY=true)
-        await sendScrapeSummary(stats);
-
-        // Store slots and detect changes
-        const changes = await storeAndDiff(allSlots);
-        if (changes.length > 0) {
-          await notifyUsers(changes);
-        }
-
-        console.log("Manual scrape completed successfully");
-      } catch (error) {
-        console.error("Manual scrape failed:", error);
-      }
-    })();
-
-    return NextResponse.json({ success: true, message: "Scrape started" });
+    return NextResponse.json({ success: true, message: "Ingest started" });
   } catch (error) {
-    console.error("Error starting scrape:", error);
-    return NextResponse.json({ error: "Failed to start scrape" }, { status: 500 });
+    console.error("Error starting ingest:", error);
+    return NextResponse.json({ error: "Failed to start ingest" }, { status: 500 });
   }
 }

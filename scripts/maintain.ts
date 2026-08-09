@@ -35,7 +35,7 @@ import {
   notificationLog,
 } from "../src/lib/schema";
 import { eq, lt, sql, count, desc } from "drizzle-orm";
-import { getNextNDays } from "../src/lib/scraper";
+import { nextDates as getNextNDays } from "../src/lib/ingest/reconcile";
 import { scrapeVenue } from "../src/lib/scrapers";
 import { VENUES } from "../src/lib/constants";
 import { sendEmail } from "../src/lib/notifiers/email";

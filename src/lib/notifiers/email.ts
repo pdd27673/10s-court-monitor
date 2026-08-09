@@ -2,7 +2,26 @@ import { Resend } from "resend";
 import { SlotChange } from "../differ";
 import { getBookingUrl } from "../utils/link-helpers";
 import { escapeHtml } from "../utils/html-escape";
-import type { ScrapeStats } from "../scraper";
+
+/**
+ * Health stats for an ingestion run, consumed by the admin failure/summary
+ * alerts below. Originally produced by the retired blind HTML scraper; kept here
+ * (its only consumer) as the alert contract so the reconcile/sweep clocks can
+ * feed it their own error counts when we wire ingestion-health alerts.
+ */
+export interface ScrapeStats {
+  durationMs: number;
+  durationFormatted: string;
+  totalRequests: number;
+  totalBytes: number;
+  totalBytesFormatted: string;
+  venuesTotal: number;
+  venuesSuccess: number;
+  venuesFailed: number;
+  datesScraped: number;
+  slotsScraped: number;
+  failedVenues: string[];
+}
 
 // Admin email for scrape alerts
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;

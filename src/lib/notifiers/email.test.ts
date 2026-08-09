@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ScrapeStats } from "../scraper";
+import type { ScrapeStats } from "./email";
 
 // Mock resend before any module imports
 const mockEmailSend = vi.fn();
 vi.mock("resend", () => ({
-  Resend: vi.fn().mockImplementation(() => ({
-    emails: { send: mockEmailSend },
-  })),
+  // Use a constructable function (not an arrow): vitest 4 invokes mocked
+  // constructors with `new`, and arrow functions cannot be constructed.
+  Resend: vi.fn().mockImplementation(function () {
+    return { emails: { send: mockEmailSend } };
+  }),
 }));
 
 function makeStats(venuesSuccess: number, venuesFailed: number): ScrapeStats {

@@ -1,0 +1,231 @@
+# Re-architecture: feed-based ingestion + shared API for web (mobile-ready)
+
+**Status:** In progress — **Phase 0 in prod (2026-07-12); staging cut over to feed-primary (2026-07-23).** Phases 1–4 built + green, running live on staging; Phases 5 (worker split) + 6 (time normalization) code-done. **Prod cutover** + Phase 7 remain. Supersedes the HTML-scrape + proxy design for Courtside venues. Cutover status + remaining steps: see "Cutover status" below.
+
+> **Note (2026-07-19):** the Phase-3 "watch-targeted reconcile" clock was reworked
+> into **confirm-on-notify + a fixed-cost full sweep** — the bounded round-robin
+> reconcile is **retired from the live tick** (kept as a diagnostic). See the Phase-3
+> row and "Feed reliability + hybrid ingestion" below; the code header in
+> `src/lib/ingest/reconcile.ts` is authoritative.
+
+## Progress
+
+| Phase | Status | Notes |
+|---|---|---|
+| **0. SQLite → Railway Postgres** | ✅ **Done — in prod (2026-07-12)** | Faithful driver+dialect port; data seeded from a live prod snapshot; `/api/health` → `database: "connected"`. See below. |
+| 1. Schema groundwork (`courts`, `feed_state`, venue geo, slot cols) | 🟡 Built — branch `feat/phase1-schema` (migration `0001`), pending deploy + seed | **PostGIS not on the Railway image → using plain `lat`/`lng` + btree index; PostGIS deferred.** Additive only. |
+| 2. OpenActive adapter alongside scrapers (+ parity gate) | ✅ **Done — branch `rearchitecture`** (RPDE client, parsers+tests, facility ingest, slot ingest, parity gate, cron wiring). | **Data-driven, London-scoped** (feed is national). Feed's London footprint = the 7 TH venues; discovered automatically. Parity 99.8%. |
+| 3. **Feed-primary hybrid ingestion** (NOT feed-only) | 🟢 **Built + wired, `persist:true` (2026-07-19)** — live tick = feed head-poll → **confirm-on-notify** → ClubSpark → **fixed-cost full sweep**; blind path retired (`scrape_targets`/`scraper.ts`/`scrape-scheduler.ts` deleted). **Live on staging (2026-07-23)**; prod cutover ⬜ | Feed alone misses ~5% of genuinely-bookable slots (stale records). Kept `scrapers/courtside.ts` as the site-truth fetcher; deleted only the *blind fixed-cadence* path. **The watch-targeted reconcile clock (`reconcileWatchedVenueDays`, bounded round-robin) was retired from the tick** — its bandwidth scaled with watched-taken venue-days; the fixed-cost sweep replaced it. It's kept as a read-only diagnostic. **Scope note:** Courtside (Tower Hamlets) only until Phase 4 wires ClubSpark/Newham into ingestion. |
+| 4. Move ClubSpark into the ingestion module | 🟢 **Built (2026-07-17)** — `ingest/clubspark/ingest.ts` (`pollClubSpark`), wired as a throttled cron clock + admin trigger, 9 DB-backed tests. Callers pass `persist:true` (fn default FALSE for previews). | Newham/LTA `GetVenueSessions` is a first-party full-snapshot JSON poll (not RPDE, not stale) → no reconcile clock of its own; correctly stays excluded from the Courtside HTML confirm/sweep. Site-wins upsert + transition→notify like Clock 1; creates `courts` by name for per-court identity. Lifts the Phase 3 "Courtside-only" scope caveat. |
+| 5. Split the worker service | 🟢 **Code done (2026-07-22)** — `runFeedIngest` extracted to `src/lib/ingest/run.ts` (shared by cron route + worker); `src/lib/ingest/worker.ts` single-instance timer loop (graceful SIGTERM drain); `railway.worker.json` (exec-tsx start, no healthcheck/migrate). Cleanup/VACUUM throttled behind a `cleanup` clock. Deploy (2nd Railway service + disable external cron) ⬜ | Signal finding: start the worker by exec-ing tsx, **not** `npm run worker` (npm swallows SIGTERM). Single instance = exactly-once polling. |
+| 6. Normalize time end-to-end (`HH:MM` / `starts_at`) | 🟢 **Code done (2026-07-23)** — canonical minute-of-day matching (`src/lib/time.ts`); `matchesWatch` + confirm-on-notify + pending-set compare on minutes, not `"7pm"` strings; `slots.start_minute` populated on every write; `watches.dayTimes` stored/emitted as canonical `HH:MM` (web renders am/pm); contract `DayTimes` = HH:MM; migration `db:migrate-daytimes`. Run the migration on staging/prod ⬜ | `slots.time` stays the am/pm label (ephemeral feed↔scraper join key); only `start_minute` was added there. Matching is format-agnostic, so the dayTimes migration is cleanup, not a flag-day. |
+| 7. Contract 0.2.0 + website + map | 🟢 **Mostly done (2026-07-23)** — contract 0.2.0 (additive Venue geo/metadata + AvailabilitySlot startsAt/endsAt/remainingUses/bookingUrl + expo-push DTO); `/api/venues` now DB-sourced (enriched, resolves the code-vs-DB split); `/api/availability` exposes the new slot fields; **`/map` Leaflet + OSM venue map** (marker per venue with coords, popups, nav link). Publish tag `contract-v0.2.0` ⬜ | Additive → 0.1.0 clients still compile. Map: Leaflet raster tiles (no API key, no CSP change); PostGIS deferred → plain lat/lng. Verified with a Playwright screenshot (markers render; tiles need real network). Expanded venue-list dashboard UI is the remaining optional polish. |
+
+### Phase 0 as-built (2026-07-12)
+
+- **Merged** via branch `feat/postgres`. Faithful 1:1 type port (text timestamps, integer booleans) — **no** time/geo normalization yet (that's Phases 1/6).
+- **`schema.ts`** `sqlite-core`→`pg-core`; identity PKs `GENERATED BY DEFAULT` (data migration preserves IDs); `::text`-cast timestamp defaults.
+- **`db.ts`** `better-sqlite3`→`node-postgres` `Pool` (lazy; safe at build); opt-in SSL only when `sslmode=require`.
+- **SQLite-only call sites** (`db.run`/`db.get` VACUUM + `SELECT 1`) → `db.execute().rows`, incl. 3 in `scripts/maintain.ts`.
+- **Migrations** regenerated as a clean Postgres baseline; `db:migrate` moved out of build → Railway startCommand (no DB at build).
+- **New scripts:** `scripts/migrate-sqlite-to-postgres.ts` (importer: preserves PKs, resets identity sequences; `--truncate`/`--dry-run`) and `scripts/reseed-from-prod.sh` (cutover: consistent `sqlite3 .backup` → truncate + reseed).
+- **Prod wiring:** web service `10s-court-monitor` (Railway project `lovely-nurturing`) `DATABASE_URL = ${{Postgres.DATABASE_URL}}` (private `postgres.railway.internal`).
+- **Rollback net:** old SQLite volume still mounted at `/app/data`; revert = `DATABASE_URL` back to `file:./data/tennis.db` + redeploy pre-Postgres commit. Detach the volume ~a week after cutover.
+- **Loose end:** a cosmetic `chore(lint)` commit (eslint `^_` ignore pattern) stayed local-only, not in the merge.
+
+## Feed reliability + hybrid ingestion (decided 2026-07-12) — supersedes "delete the scraper"
+
+The original plan (Phase 3) was to cut Courtside fully to the feed and delete `scrapers/courtside.ts`. **We audited that assumption and it does not hold.**
+
+**Audit** (`scripts/feed-vs-site-audit.ts`, feed vs the live booking site as ground truth, 7 venues × 8 days ≈ 1,380 court-hours, joined by venue/date/hour/court#/tennis-only):
+- **Raw agreement ~99.6%** — but that's dominated by booked slots (both trivially agree "taken"). Misleading denominator.
+- **Miss rate on *availability* ~5%** (5 of ~97 genuinely-bookable court-hours). For a "notify when a court frees up" product, the feed hides ~**1 in 20 free courts**.
+- Cause: **feed staleness** — records 48–116h old (2–5 days) the operator never re-emitted after a cancellation. Errors go both ways (mostly false-negative = missed alert; occasionally false-positive = wasted alert).
+- **0 coverage gaps; per-venue court counts match 1:1** → the join is sound, so the disagreements are genuine data, not mapping bugs.
+- **The feed cannot detect its own staleness:** a correctly-stable-booked slot and a wrongly-stale one are byte-identical (`remainingUses:0`, old `modified`). `modified` age ≠ wrongness. So consistency with the booking site can ONLY be established by consulting the site. The scrape is not optional garnish — it *is* the consistency mechanism.
+
+**Original design (2026-07-12): three clocks.** Correctness only has to be fast where a human is waiting (a *watch*), so scrapes are spent on **unsatisfied demand**, not the catalog.
+
+| Clock | Cadence | Scope | HTML scrapes/day | Purpose |
+|---|---|---|---|---|
+| **1. Feed head poll** | 30 s | all venues/dates (RPDE delta) | **0** | real-time freshness, ~95% of truth, no proxy |
+| **2. Watch-targeted reconcile** | 15 min | only venue-days containing a *pending* slot (some ACTIVE watch wants it AND our DB says taken) | ~300–700¹ | catches the feed's stale misses exactly where a notification is owed |
+| **3. Daily full sweep** | 24 h | all 7 venues × 8 days = 56 venue-days | 56 | dashboard correctness floor + feed-drop safety net; re-baselines Clock 2 |
+
+¹ ≈ (pending venue-days) × 96 cycles/day, shrinking as watches satisfy/expire.
+
+**Conflict rule (unchanged):** on any feed-vs-scrape disagreement, **the site wins** (feed = authoritative for freshness, site = authoritative for truth). Site=available but DB=taken → treat as a `booked→available` transition and **fire the notification** — so a feed-missed free-up still notifies, at scrape latency.
+
+### AS BUILT (reworked 2026-07-19) — confirm-on-notify + fixed-cost sweep
+
+Clock 2's watch-targeted reconcile was **retired from the live tick**: a live-watch preview showed its bandwidth scaling to ~3× the blind scrape it was meant to replace (one all-venues watch fans out to every venue-day), and bounding it traded that for unbounded per-slot miss latency. The rework splits the reconcile's two jobs by which error direction they close, and makes both costs predictable:
+
+| Mechanism | Cadence | Scope | Closes | Cost |
+|---|---|---|---|---|
+| **1. Feed head poll** (`pollSlots`) | every tick | all venues/dates (RPDE delta) | freshness (~95% of truth) | **0** HTML |
+| **confirm-on-notify** (`confirmFeedChanges`) | on each Clock-1 flip | venue-days of *watched Courtside* flips only | feed **false-positives** (drops the wasted alert) + bonus false-negatives on those days | per real watched transition |
+| **3. Full sweep** (`fullSweep`) | `SWEEP_INTERVAL_HOURS`, default **2h** | all active Courtside venue-days (~56/run) | feed **false-negatives** (the missed free-up) + dashboard floor | **fixed** (~56 × 12/day ≈ 672 HTML/day), independent of watcher count |
+
+Why this is better than the bounded reconcile: false-negative discovery no longer depends on a watch existing *and* the round-robin cursor reaching that venue-day in time — the sweep covers everything on a fixed 2h SLA. false-positive suppression happens exactly where a notification is about to fire, at cost proportional to real transitions rather than to the pending set. ClubSpark is first-party truth and is excluded from both.
+
+**Correctness guarantees (as built):**
+- Slot frees up, feed catches it (~95%): notified **≤ one tick** (minus confirm-on-notify latency for watched Courtside flips).
+- **Any** slot frees up, feed misses it (the ~5% tail): corrected + notified **≤ `SWEEP_INTERVAL_HOURS`** (default 2h) by the full sweep — no longer requires a watch on it.
+- Feed *wrongly* shows a watched slot available (false-positive): the alert is **suppressed** before it fires (confirm-on-notify), degrading safely to direct-notify when the proxy/scrape is unavailable.
+
+**Tuning knobs:** `SWEEP_INTERVAL_HOURS` = worst-case false-negative latency (bandwidth vs freshness); `CONFIRM_ON_NOTIFY` on/off + `CONFIRM_MAX_VENUE_DAYS` cap; Clock 1 tick = freshness-vs-politeness. **Exit condition:** `feed-vs-site-audit.ts` stays the feed-health meter — if the miss rate trends to ~0, dial the sweep down or drop it with data to justify it.
+
+## Context
+
+The current backend (`10s-court-monitor-local`, Next.js 16 + Drizzle + **better-sqlite3** on Railway) scrapes tennis availability on a 10-minute cron: brittle **HTML/cheerio scraping** of Tower Hamlets "Courtside" pages through a **rotating residential proxy** (Webshare), plus a cleaner **ClubSpark JSON** call for Newham. It diffs into a `slots` table and notifies via Telegram/Resend email.
+
+On 2026-07-12 we confirmed the Courtside operator (Premier Tennis / Courtside Hubs CIC) publishes the **same availability as an official, no-auth, CC-BY 4.0 OpenActive RPDE change-feed** — an incremental cursor feed that is cheaper, far fresher, and licensed for third parties. This removes the entire HTML-scrape + proxy machinery for Courtside and enables **sub-minute freshness**. ClubSpark's OpenActive only publishes coaching courses, so Newham stays on its first-party JSON API (also sanctioned — no proxy).
+
+**Goal of this phase (per user):** rework (1) *how ingestion works* (scraping → feeds), (2) *how that data is exposed via the shared API/contract* for web + later mobile, and (3) *wire the fresher data + notifications into the website only*. Native mobile push, paywall, and in-app/auto booking are explicitly **later** (design leaves hooks). Coverage target: **all London venues we can get** (multi-operator, London-focused) — which for free adds the 3 Tower Hamlets venues already in the feed (Wapping Gardens, King Edward Memorial Park, Poplar Rec Ground). St Johns Park is closed for renovations (in metadata feed, emits no slots — expected). With many venues, a **map view** is a first-class product need.
+
+## Guiding constraints
+
+- **No regressions.** Current functionality (scrape→diff→notify, dashboard, auth, watches/channels, admin) keeps working throughout. The risky storage swap is an isolated, parity-verified first phase; feeds later run *alongside* scrapers with a parity gate before anything is deleted.
+- **Consolidate on Railway.** Everything in one Railway project/account/bill — no second provider. (Railway runs multiple services + one Postgres on a private network natively, so splitting services does **not** require leaving Railway or adding Neon.)
+
+## Architecture: two Railway services + one shared Postgres
+
+Data flows one-way through the DB; **mobile is just another client of the same REST API** (it never talks to ingestion). Splitting ingestion off lets the API/web tier scale and restart independently of the poller — the real benefit as mobile traffic grows.
+
+```
+┌────────────────────────┐        ┌──────────────────────────────────────┐
+│ worker service (NEW)   │ writes │ web / API service (existing Next.js)   │
+│  Ingestion loop:       │──────▶ │  reads ◀───────────────┐               │
+│  • OpenActive RPDE      │        │  REST API (contract) ▸ website + MAP   │
+│    poller (Courtside)   │   ┌────┤  auth · watches/channels CRUD · admin  │
+│  • ClubSpark JSON       │   │    │  (scales to N instances for app users) │
+│    poller (Newham)      │   │    └───────────────────────┬────────────────┘
+│  • Normalize→Diff→Notify│   │                            │
+│    (Telegram + email)   │   │  private networking        │  reads
+└───────────┬─────────────┘   ▼                            ▼
+            └──────────▶  Railway Postgres (+ PostGIS)  ◀──── (managed backups)
+                          one instance, shared by both services
+                                     ▲ REST API also serves ─▶ mobile app (later)
+```
+
+Both services deploy from the **same repo** (different start commands) and share **one `DATABASE_URL`** via Railway reference variables. Both import the shared **`@pdd27673/10s-contract`** types.
+
+## Why this topology (resolving the decisions)
+
+- **One Postgres, not two.** A web service and a worker are two *clients* of the same database (worker `INSERT`s, API `SELECT`s). No replication/syncing.
+- **Split services need a networked DB** (SQLite can't be shared across machines) → **Postgres**. Use **Railway's own Postgres** (same project, private network, one bill) — not Neon (2nd provider/bill; and its scale-to-zero saving is nullified by a continuous ~30s poller keeping it warm).
+- **Postgres also unlocks the map.** **PostGIS** gives fast indexed geo queries ("near me / within map viewport / by distance") over many venues; SQLite would need manual haversine or the awkward spatialite extension.
+- **Worker = single instance**, API = scalable. The poller must run exactly once (a second instance would double-poll/double-notify); the API tier is free to scale for mobile.
+
+## Data model changes (`src/lib/schema.ts` → Postgres via `drizzle-orm/node-postgres`)
+
+Port existing tables to Postgres (identity PKs, `timestamptz`, `jsonb`; the custom NextAuth adapter's `DELETE … RETURNING` is Postgres-supported). Then:
+
+| Change | What | Why |
+|---|---|---|
+| **Normalize time** | `slots`: `starts_at timestamptz`, `ends_at`, `start_minute int`; drop reliance on `time` (`"7pm"`). API derives display label. | Kills the `"7pm"` string-equality coupling in `matchesWatch` (`notifiers/index.ts:66`) and the `slots` unique key; enables 30-min slots + cross-operator consistency. |
+| **Data-driven venues + geo** | Expand `venues`: `operator`/`platform`, `source_type`, `external_id`, `address`,`postcode`,`amenities jsonb`, `booking_url_template`, `active`, and **`geog geography(Point,4326)`** (from feed lat/lng) with a **GiST index**. Seed from feed + `constants.ts`. | Config moves out of `constants.ts` into the DB. `facility-uses` supplies geo/address/amenities free. **PostGIS powers the map.** |
+| **Courts table (new)** | `courts`: `id`,`venue_id`,`external_id` (individual-facility-use `@id`),`name`. `slots.court_id → courts.id`. | Stable court identity; per-court display, survives renames. |
+| **Feed cursors (new)** | `feed_state`: `source`,`feed`,`next_cursor`,`last_polled_at`. **Replaces `scrape_targets`.** | RPDE is cursor-based; the per-venue-per-date scheduler is an HTML-pagination artifact. |
+| **Slot identity** | Unique `(court_id, starts_at)`; add `remaining_uses`,`max_uses`,`price numeric`,`booking_url`. | Matches RPDE slot shape (`remainingUses` = availability). |
+| **Notification dedupe** | `notification_log.slot_key` → stable `courtId:startsAtISO`. | Survives label/format changes. |
+
+Migrate real data (`users`,`watches`,`notification_channels`,`registration_requests`,`verification_tokens`) via export/import; `slots`/`feed_state`/`notification_log` are ephemeral (rebuilt from feeds). Migrate `watches.dayTimes` `"7pm" → "19:00"` (modeled on `scripts/migrate-watches-to-days.ts`).
+
+## Ingestion: source-adapter pattern (new `src/lib/ingest/`, run by the worker)
+
+Replaces the *blind fixed-cadence* pipeline — `scrape-scheduler.ts` (`scrape_targets`), `scraper.ts` — and demotes the proxy. **Keeps `scrapers/courtside.ts` as Clock 2/3's reconcile fetcher** (see "Feed reliability" above): the feed can't detect its own staleness, so a scoped scrape stays as the correctness backstop. Keep `src/proxy.ts`'s Next.js auth/bot-guard middleware regardless.
+
+- **`ingest/sources/openactive.ts`** — RPDE poller. Backfill `facility-uses` + `individual-facility-use-slots` page-1→head, persisting `next` in `feed_state`; poll the head cursor on a timer for deltas. `updated`→upsert (`remainingUses>0`=available); `deleted`→remove. **Confirmed live**: all target venues present; ~88-page backfill (~1.6 MB one-time), then near-empty delta pages. Pace ~0.4 s/page (server throttles rapid fire); never fabricate cursors (server ignores client `afterTimestamp`). Attribution: "Data © Courtside Hubs CIC (CC-BY 4.0)".
+- **`ingest/sources/clubspark.ts`** — keep existing `GetVenueSessions` logic (`scrapers/clubspark.ts:39`), interval-polled, no proxy.
+- **`ingest/normalize.ts`** — map each source to the canonical slot.
+- **`ingest/differ.ts`** — keep **transition-only** rule from `differ.ts:74` (notify only booked/closed→available; backfill does NOT notify). Emit `SlotChange`.
+- **`ingest/worker.ts`** — the worker-service entrypoint (its Railway start command). Runs the loop, single-flight guard, calls differ → `notifyUsers`. A manual re-backfill trigger stays available.
+
+## Contract evolution (`packages/contract/src/index.ts`, 0.1.0 → 0.2.0)
+
+**Additive / backward-compatible** so website and current mobile keep compiling.
+- `Venue`: add optional `lat`,`lng`,`address`,`postcode`,`amenities`,`operator`,`bookingUrl` (drives the map).
+- `AvailabilitySlot`: add optional `startsAt`,`endsAt`,`court`,`remainingUses`; keep `time` label for existing clients.
+- Standardize `DayTimes` on `"HH:MM"` (file's own example already shows `["18:00","19:00"]` vs scrapers' `"7pm"`).
+- Leave `Me.isAdmin/isAllowed` as `number` (changing breaks mobile) — later major bump. Add a typed-but-unused `expo-push` registration DTO so mobile can wire later with no contract change.
+
+## Notifications (web only, this phase)
+
+The **worker** fires **Telegram + email** on transition-to-available (reuse `notifiers/telegram.ts`, `email.ts`, `index.ts`). Freshness improves from ≤10 min → poll interval. Leave the `expo-push` branch as a marked no-op TODO — **do not wire mobile push now**.
+
+## Website wiring (this phase)
+
+- Point dashboard/availability UI at the enriched API; add the **expanded London venue list**, fresher `lastUpdated` ("updated Ns ago"), per-court data, and a **map view** backed by PostGIS (viewport/radius queries). `api/availability/route.ts` and `api/venues/route.ts` read the new model (venues now from DB — resolves today's code-vs-DB split).
+- Keep scope tight: enhance the **existing authed dashboard + coverage + map**; no separate public browse site / paywall (not selected).
+
+## Migration phases (incremental, each shippable, no regressions)
+
+0. **SQLite → Railway Postgres** (isolated, well-tested; the main regression surface). Add Postgres to the Railway project; swap Drizzle driver to `node-postgres`; port schema; data export/import for user tables; enable PostGIS. Verify the *existing* monolith (scrapers, dashboard, auth, notify) runs green on Postgres before splitting anything.
+1. **Schema groundwork** — add `courts`,`feed_state`, new `venues`(+`geog`)/`slots` columns; seed venues.
+2. **OpenActive adapter in the monolith** ✅ — RPDE client, parsers, facility + slot ingest, `feed-vs-site-audit.ts`. **Parity gate cleared** (99.8%), but the audit surfaced the ~5% feed miss-rate that reshaped Phase 3 (below).
+3. **Feed-primary hybrid ingestion.** ✅ **Built + wired, `persist:true` (2026-07-19)** — see "AS BUILT" above. Live tick in `api/cron/scrape/route.ts` (`runFeedIngest`), all writers `persist:true`:
+   - **Clock 1 — feed head-poll** (`pollSlots`, every tick): applies RPDE deltas to `slots`, notifies on transition. Emits an `unresolvedBy` breakdown so national-feed noise ≠ a seeding gap. **Non-tennis courts are seeded-but-flagged** (`courts.non_tennis`) rather than dropped, so padel at a mixed venue counts as `excludedNonTennis` instead of masquerading as an unmapped court; flagged courts never write slots or notify. **Self-heals** a genuine gap: unmapped tracked-venue slots are buffered, the facility ingest re-runs (throttled by `FACILITY_HEAL_MIN_MINUTES`, default 60), and the slots are retried against the reloaded court index in the same tick — so `unmappedCourt` surviving to the log is a real upstream feed gap.
+   - **confirm-on-notify** (`confirmFeedChanges`): scrapes the venue-days of *watched Courtside* Clock-1 flips, drops false-positive alerts (site-wins upsert corrects the dashboard), folds in bonus false-negatives. Per-transition cost; `CONFIRM_ON_NOTIFY` toggle, `CONFIRM_MAX_VENUE_DAYS` cap; fails safe to direct-notify.
+   - **Clock 3 — full sweep** (`fullSweep`, throttled `SWEEP_INTERVAL_HOURS`, default 2h): all active Courtside venue-days (~56/run), site-wins upsert, notifies on transitions. **Fixed-cost false-negative discovery** + dashboard floor — the sole mechanism that catches feed-hidden free-ups, now independent of watches.
+   - **Retired from the tick:** `reconcileWatchedVenueDays` / `computePendingSet` / `selectReconcileTargets` (the bounded round-robin) stay in `reconcile.ts` + tests + `scripts/reconcile-*.ts` as read-only diagnostics; `RECONCILE_MAX_PAGES` is diagnostic-only, `RECONCILE_INTERVAL_MIN` is gone.
+   - **Blind path retired:** ✅ deleted `scrape-scheduler.ts`, `scraper.ts`, the `scrape_targets` table (migration `0002` drops it), `storeAndDiff`/`getAvailability`, `scripts/test-scraper.ts`. **Kept `scrapers/courtside.ts` + `cheerio`** as the site-truth fetcher. Proxy demoted (optional; only confirm/sweep use it, always fail-safe).
+   - **Admin trigger:** `api/admin/scrape` = the same pipeline unthrottled, admin-only.
+   - **Cutover:** gate is DB state + deploy, not a code flag. Staging done (2026-07-23); prod remaining — see "Cutover status" below.
+4. **Move ClubSpark into the ingestion module** ✅ **(2026-07-17)** — `pollClubSpark` in `src/lib/ingest/clubspark/ingest.ts`: reuses the tested `scrapeClubSpark` fetch (proxy-free when unconfigured), resolves/enriches the venue (`source_type='clubspark'`), creates `courts` by name, site-wins upserts the snapshot into feed-owned `slots`, returns booked/closed/coaching→available transitions. Wired as a throttled clock (`CLUBSPARK_INTERVAL_MIN`, default 5) in the cron + the admin trigger; unions into the single `notifyUsers`. Callers pass `persist:true` (function default is FALSE for previews). **No reconcile for ClubSpark:** `GetVenueSessions` is first-party authoritative (not an RPDE change-feed), so the Courtside HTML confirm/sweep keeps excluding it. Preview: `scripts/clubspark-poll-preview.ts`.
+5. **Split the worker service** ✅ **code done (2026-07-22)** — extracted the tick body into `src/lib/ingest/run.ts` (relative imports, Next-runtime-free; shared by the cron route and the worker) and added `src/lib/ingest/worker.ts`, a single-instance `setInterval` loop (`WORKER_TICK_SECONDS`, default 30) with an in-process single-flight guard and graceful SIGTERM/SIGINT drain. Cleanup+VACUUM moved off the per-tick path onto a `cleanup` clock (`CLEANUP_INTERVAL_HOURS`, default 6h). `railway.worker.json` configures the 2nd service (exec-tsx start command so SIGTERM reaches Node — `npm run worker` does not forward it; no healthcheck; no `db:migrate`, the web service owns migrations). The cron route stays as a manual/fallback trigger. **Deploy remaining (ops):** create the 2nd Railway service sharing `DATABASE_URL`, then disable the external cron so ingest doesn't double-run.
+6. **Normalize time end-to-end** ✅ **code done (2026-07-23)** — `src/lib/time.ts` is the one place every time form (`"7pm"`, `"19:00"`, feed ISO wall-clock) collapses to **minute-of-day**. `matchesWatch` (`notifiers/index.ts`), confirm-on-notify + the pending-set keys (`reconcile.ts`), all now compare on minutes — the `"7pm"` string-equality coupling is gone. `slots.start_minute` is populated on every writer (feed from ISO, ClubSpark/scraper from the label). `watches.dayTimes` is stored and returned as canonical **`HH:MM`**: the watch APIs normalise on write (accepting either form for back-compat), the web dashboard renders am/pm via `dayTimesToLabels` on hydration, and the contract `DayTimes` documents HH:MM. Data migration `scripts/migrate-daytimes-to-hhmm.ts` (`npm run db:migrate-daytimes [--dry-run]`) is idempotent cleanup — matching works through mixed data, so there's no flag-day. **`slots.time` intentionally stays the am/pm display label** (ephemeral, the feed↔scraper join key); it gained `start_minute` rather than changing format. **Remaining (ops):** run the migration on staging + prod.
+7. **Contract 0.2.0 + website + map** — publish contract, wire dashboard + PostGIS map, expand venues.
+
+Representative files: **add** `src/lib/ingest/**` (incl. feed head-poll loop, watch-targeted reconcile, daily sweep), `ingest/worker.ts`, `courts`/`feed_state` migrations, PG data-migration script, second-service Railway config; **modify** `schema.ts`, `db.ts`(driver), `differ.ts`(→ingest; site-wins conflict rule), `notifiers/index.ts`(matchesWatch), `api/availability/route.ts`, `api/venues/route.ts`, `packages/contract/src/index.ts`, `constants.ts`(→seed), `scrapers/courtside.ts`(reused as reconcile fetcher), `railway.json`/`nixpacks.toml`(Postgres + worker service, drop native-sqlite build; proxy env now optional); **delete** `scrape-scheduler.ts`, `scrape_targets`, `scraper.ts`(blind orchestrator), `proxy-manager.ts` only if the reconcile fetcher no longer needs it. **Keep** `scrapers/courtside.ts` + `cheerio`, and `src/proxy.ts` auth/bot-guard middleware.
+
+## Cutover status
+
+The cutover gate is **DB state + deploy**, not a code flag — every ingest writer runs `persist:true`. On a fresh Postgres the `slots` table starts empty, so the first ingest is a pure backfill and (by the `isNewlyAvailable` transition rule) **notifies nothing**; real notifications begin on the second tick, on genuine booked→available flips.
+
+**Staging — DONE (2026-07-23).** Feed-primary service live on staging Postgres, ingesting for a while. Feed head-poll + ClubSpark write `slots` and notify on transitions.
+- ⚠️ **No proxy configured on staging**, so the Courtside HTML path (confirm-on-notify + the full sweep) 404s and **fails safe** → those stages are effectively no-ops there. Consequence: the **~5% feed-false-negative backstop is absent on staging**, and confirm-on-notify can't drop false-positives — feed/ClubSpark availability is unaffected. Close the gap by setting the `WEBSHARE_*` proxy vars *or* verifying direct Courtside fetch holds from the staging IP.
+
+**Prod — remaining.** Same deploy sequence, with one extra step: prod's `slots` already holds scraper-written `"Tennis court N"` rows, so **truncate `slots` (and `feed_state`, `notification_log`) before the first feed persist** or they'll duplicate the feed's `"Court N"` rows under the `(venue,date,time,court)` unique key. Import only the user tables from any snapshot, never `slots`. Then deploy the feed-primary service and disable the old scraper cron.
+
+**Env vars** (all optional except `DATABASE_URL`/`CRON_SECRET`/`AUTH_SECRET`): `SCRAPE_DAYS` (8), `FACILITY_REFRESH_HOURS` (6), `CLUBSPARK_INTERVAL_MIN` (5), `SWEEP_INTERVAL_HOURS` (2), `CONFIRM_ON_NOTIFY` (on) + `CONFIRM_MAX_VENUE_DAYS`, `CLEANUP_INTERVAL_HOURS` (6), `CLEANUP_DAYS` (7), `WORKER_TICK_SECONDS` (30, worker only), `WEBSHARE_*` (proxy; leave unset to go direct/fail-safe). Notifications no-op without creds (`TELEGRAM_*`, `RESEND_API_KEY`/`EMAIL_FROM` or `GMAIL_*`, `ADMIN_EMAIL`). The retired reconcile's `RECONCILE_*` are diagnostic-only.
+
+**Verify:** `/api/health` → `database:"connected"`; both `source_type='courtside'` and `'clubspark'` rows have `slots > 0`; `/api/availability` + `/api/venues` show Newham alongside Tower Hamlets; second tick is cheap (Clock 1 resumes at head, sweep respects its throttle); a real book→cancel fires a transition within the clock interval.
+
+## Cost estimate (monthly)
+
+| Item | Now | After |
+|---|---|---|
+| Railway web/API service | ~$5 | ~$5 |
+| Railway worker service | — | ~$5 (small, single instance) |
+| Railway Postgres | — | ~$5–10 (small, usage-based) |
+| Residential proxy (Webshare) | variable $ (per-GB) | **~$0 — demoted** to the low-rate Clock 2/3 reconcile only (~400–750 GETs/day vs ~2,400+); likely droppable if direct fetch holds up |
+| Email (Resend) / Telegram / OpenActive feeds | free tiers | free (feeds CC-BY, ~MBs egress) |
+| **Total** | Railway + proxy | **~$15–20**, comparable to today while adding coverage, a map, sub-minute freshness, and a scalable API tier |
+
+Later/out-of-scope: EAS/Expo Push (free tier), Stripe (paywall), UK-region booking worker (Open Booking API needs partner registration).
+
+## Future hooks (designed-in, not built now)
+
+- **Mobile push**: `expo-push` already a `ChannelType`; add the notifier branch (fired by the worker) + EAS `projectId` later — no schema/contract change.
+- **API scaling**: web service can already scale to multiple instances independently of the single-instance worker.
+- **More operators**: drop a file in `ingest/sources/` + seed venues; investigate other London OpenActive operators (Better/GLL, Places Leisure).
+- **Booking**: add an Open Booking API client in the worker later (UK region for latency); `booking_url` deep-link covers hand-off meanwhile.
+
+## Verification
+
+- **Phase 0 gate:** existing app fully functional on Postgres (auth login, watch CRUD, a scrape cycle, a notification) before splitting.
+- **Parity gate (phase 2)** ✅ — `scripts/parity-openactive.ts` diffs RPDE-derived availability vs the HTML scraper per TH venue+date; **99.8%** cleared. Feed-vs-live-site audit (`scripts/feed-vs-site-audit.ts`) then quantified the ~5% miss-rate → 3-clock hybrid.
+- **Reconcile gate (phase 3):** with all 3 clocks running, force a feed false-negative (find a `taken`-but-stale slot the site shows available) and confirm Clock 2 catches it and fires the notification within its interval; confirm `feed-vs-site-audit.ts` miss-rate on availability stays at/below the pre-cutover baseline.
+- **Split gate (phase 5):** with the worker service running and the web service scaled to 2 instances, confirm exactly-once polling (no duplicate notifications) and that the API reads reflect worker writes.
+- **Freshness:** book/cancel a real slot (or watch the feed); confirm the worker reflects it within one poll interval and fires a test Telegram/email on a transition.
+- **Map/geo:** viewport + radius (lat/lng btree) query returns correct venues; map renders expanded coverage.
+- **Contract:** typecheck web + mobile against 0.2.0 (additive → both compile); run existing `vitest`.
+- **Proxy:** confirm no proxy is used on the feed (Clock 1) path; it may remain ONLY as the low-rate Clock 2/3 reconcile fetcher (optional env).
+
+## Open decisions (confirm during build)
+
+- RPDE head poll interval (15 s vs 30 s vs 60 s) — freshness vs politeness; start 30 s.
+- Clock 2 reconcile interval (= the notification-miss SLA) — start 15 min; tune against the measured pending-set size.
+- Whether the Clock 2/3 reconcile fetcher keeps the residential proxy or goes direct (its rate is low enough that direct may be fine — verify against 502/timeout rate seen in the audit).
+- Map rendering lib for the website (e.g. MapLibre GL + free tiles) — chosen when wiring phase 7.

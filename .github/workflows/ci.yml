@@ -2,39 +2,64 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, rearchitecture]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, rearchitecture]
 
 jobs:
   check:
-    name: Type Check & Lint
+    name: Type Check, Lint & Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check contract
-        run: npx tsc --noEmit -p packages/contract
+      - name: Type check contract (TypeScript 7 native)
+        run: npm run typecheck:contract
 
-      - name: Type check
-        run: npx tsc --noEmit
+      - name: Type check (TypeScript 7 native)
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint
 
-      - name: Test
-        run: npm test
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          flags: lib
+          # Public-repo tokenless upload works but is rate-limited; add a
+          # CODECOV_TOKEN repo secret for reliable uploads. Never fail CI on a
+          # coverage-upload hiccup.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e "const fs=require('fs'); const f='./coverage/coverage-summary.json'; if(!fs.existsSync(f)){console.log('no coverage summary (tests did not produce one) — skipping'); process.exit(0);} const s=require(f).total; let o='### Coverage (src/lib)\n\n| metric | % | covered/total |\n|---|---|---|\n'; for (const k of ['lines','statements','functions','branches']) o+='| '+k+' | '+s[k].pct+'% | '+s[k].covered+'/'+s[k].total+' |\n'; fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, o);"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
 
   build:
     name: Build
@@ -43,12 +68,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "24"
           cache: "npm"
 
       - name: Install dependencies
@@ -59,3 +84,29 @@ jobs:
         env:
           # Skip telemetry during build
           NEXT_TELEMETRY_DISABLED: 1
+
+  security:
+    name: Vulnerability Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit report (all severities, informational)
+        if: always()
+        run: |
+          npm audit --json > audit.json || true
+          node -e "const v=require('./audit.json').metadata.vulnerabilities; let o='### npm audit\n\n| severity | count |\n|---|---|\n'; for (const k of ['critical','high','moderate','low','info']) o+='| '+k+' | '+(v[k]||0)+' |\n'; o+='| **total** | **'+v.total+'** |\n'; require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, o);"
+
+      - name: Fail on production critical vulnerabilities
+        run: npm audit --omit=dev --audit-level=critical

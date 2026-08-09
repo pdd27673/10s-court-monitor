@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { watches, venues } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { normalizeDayTimes } from "@/lib/time";
 
 // GET /api/watches - List user's watches
 export async function GET() {
@@ -70,7 +71,9 @@ export async function POST(request: Request) {
 
   const userId = parseInt(session.user.id);
   const body = await request.json();
-  const { venueSlug, dayTimes } = body;
+  const { venueSlug } = body;
+  // Store canonical HH:MM regardless of whether the client sent "7pm" or "19:00".
+  const dayTimes = normalizeDayTimes(body.dayTimes);
 
   // Get venue ID if provided
   let venueId = null;

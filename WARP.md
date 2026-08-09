@@ -29,12 +29,12 @@ npm run db:seed      # Seed database with test user and venues
 ```bash
 npm run maintain     # Run maintenance tasks
 npm run soak-test    # Run soak/load testing
-npx tsx scripts/test-scraper.ts  # Test the scraper directly
+npx tsx scripts/poll-slots-preview.ts  # Read-only preview of the feed head-poll
 ```
 
 ### Manual Testing
 ```bash
-# Test scraper via API
+# Trigger a full ingest cycle via API
 curl http://localhost:3000/api/cron/scrape
 
 # Check health
@@ -48,18 +48,30 @@ curl "http://localhost:3000/api/availability?venue=victoria-park&date=2025-01-21
 
 ### Tech Stack
 - **Frontend/Backend**: Next.js 16 (App Router, React 19)
-- **Database**: SQLite with Drizzle ORM (WAL mode)
-- **Web Scraping**: Cheerio (HTML parsing, no browser required)
+- **Database**: Railway Postgres with Drizzle ORM (node-postgres)
+- **Ingestion**: OpenActive RPDE feed (primary) + Cheerio HTML scrape (full sweep + confirm-on-notify backstop)
 - **Notifications**: Telegram Bot API, Gmail via Nodemailer
-- **Deployment**: Railway (recommended) with persistent volume for SQLite
+- **Deployment**: Railway (recommended)
 
 ### Core Components
 
-**Scraper Pipeline** (`src/lib/scraper.ts`)
-- Fetches HTML from tennistowerhamlets.com for 7 venues × 7 days
-- Parses availability tables using Cheerio selectors
-- No browser/Playwright needed - simple HTTP + DOM parsing
-- Returns structured slot data (venue, date, time, court, status, price)
+**Feed-primary ingestion** (`src/lib/ingest/`)
+- Clock 1 (`ingest/openactive/ingest.ts` `pollSlots`): applies OpenActive RPDE
+  deltas to `slots` — no HTML. Instant notifications for the ~95% the feed reports
+  correctly.
+- Confirm-on-notify (`ingest/reconcile.ts` `confirmFeedChanges`): scrapes only the
+  venue-days of *watched* feed flips to suppress false-positive alerts (site wins);
+  per-transition cost. Fails safe to direct-notify when the proxy is off.
+- Full sweep (`ingest/reconcile.ts` `fullSweep`): periodic scrape of every active
+  Courtside venue-day, throttled to `SWEEP_INTERVAL_HOURS` (default 2). The only
+  false-negative discovery mechanism + dashboard-correctness net; FIXED cost,
+  independent of watcher count.
+- Retired from the live tick (kept as read-only diagnostics + `scripts/reconcile-*`):
+  the watch-targeted `reconcileWatchedVenueDays` clock and its `computePendingSet`
+  planner — its bandwidth scaled with watch demand, which the fixed-cost sweep
+  now covers.
+- Scrapers (`src/lib/scrapers/courtside.ts`) return structured slot data
+  (venue, date, time, court, status, price) for the sweep and confirm-on-notify
 
 **Change Detection** (`src/lib/differ.ts`)
 - Compares scraped slots against database state
@@ -136,9 +148,9 @@ sqlite3 data/tennis.db
 INSERT INTO users (email) VALUES ('user@example.com');
 ```
 
-### Testing Scraper Changes
+### Testing Ingest Changes
 ```bash
-npx tsx scripts/test-scraper.ts  # Tests ropemakers-field for next 2 days
+npx tsx scripts/reconcile-run-preview.ts  # Read-only preview of a reconcile run
 ```
 
 ### Testing Notifications

@@ -1,9 +1,13 @@
 import { db } from "./db";
-import { slots, venues } from "./schema";
-import { eq, and, notInArray } from "drizzle-orm";
-import { ScrapedSlot } from "./scraper";
+import { venues } from "./schema";
+import { eq } from "drizzle-orm";
 import { VENUES } from "./constants";
 
+/**
+ * A booked/closed → available transition, emitted by the ingestion stages and
+ * consumed by `notifyUsers`. The canonical change shape shared across the feed
+ * head-poll (Clock 1), confirm-on-notify, and the periodic full sweep.
+ */
 export interface SlotChange {
   venue: string;
   venueName: string;
@@ -15,7 +19,9 @@ export interface SlotChange {
   price?: string;
 }
 
-// Ensure all venues exist in the database
+// Ensure all statically-configured venues exist in the database. The OpenActive
+// facility ingest enriches these rows (geo/courts/external_id) and adds any
+// feed-discovered venues on top.
 export async function ensureVenuesExist() {
   for (const venue of VENUES) {
     const existing = await db.query.venues.findFirst({
@@ -29,122 +35,4 @@ export async function ensureVenuesExist() {
       });
     }
   }
-}
-
-// Get venue ID by slug
-async function getVenueId(slug: string): Promise<number | null> {
-  const venue = await db.query.venues.findFirst({
-    where: eq(venues.slug, slug),
-  });
-  return venue?.id ?? null;
-}
-
-// Store scraped slots and return changes
-export async function storeAndDiff(scrapedSlots: ScrapedSlot[]): Promise<SlotChange[]> {
-  const changes: SlotChange[] = [];
-
-  // Group scraped slots by venue for efficient processing
-  const byVenue: Record<string, ScrapedSlot[]> = {};
-  for (const slot of scrapedSlots) {
-    if (!byVenue[slot.venue]) byVenue[slot.venue] = [];
-    byVenue[slot.venue].push(slot);
-  }
-
-  for (const [venueSlug, venueSlots] of Object.entries(byVenue)) {
-    const venueId = await getVenueId(venueSlug);
-    if (!venueId) continue;
-
-    const venueName = VENUES.find((v) => v.slug === venueSlug)?.name ?? venueSlug;
-
-    // Track upserted slot IDs so we can prune stale rows per date afterwards
-    const upsertedIdsByDate: Record<string, number[]> = {};
-
-    for (const scrapedSlot of venueSlots) {
-      // Find existing slot in database
-      const existing = await db.query.slots.findFirst({
-        where: and(
-          eq(slots.venueId, venueId),
-          eq(slots.date, scrapedSlot.date),
-          eq(slots.time, scrapedSlot.time),
-          eq(slots.court, scrapedSlot.court)
-        ),
-      });
-
-      const oldStatus = existing?.status ?? null;
-      const newStatus = scrapedSlot.status;
-
-      // Detect newly available slots (was booked/closed, now available)
-      if (
-        newStatus === "available" &&
-        oldStatus !== null &&
-        oldStatus !== "available"
-      ) {
-        changes.push({
-          venue: venueSlug,
-          venueName,
-          date: scrapedSlot.date,
-          time: scrapedSlot.time,
-          court: scrapedSlot.court,
-          oldStatus,
-          newStatus,
-          price: scrapedSlot.price,
-        });
-      }
-
-      // Upsert the slot
-      let upsertedId: number;
-      if (existing) {
-        await db
-          .update(slots)
-          .set({
-            status: newStatus,
-            price: scrapedSlot.price,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(slots.id, existing.id));
-        upsertedId = existing.id;
-      } else {
-        const [inserted] = await db.insert(slots).values({
-          venueId,
-          date: scrapedSlot.date,
-          time: scrapedSlot.time,
-          court: scrapedSlot.court,
-          status: newStatus,
-          price: scrapedSlot.price,
-        }).returning({ id: slots.id });
-        upsertedId = inserted.id;
-      }
-
-      if (!upsertedIdsByDate[scrapedSlot.date]) upsertedIdsByDate[scrapedSlot.date] = [];
-      upsertedIdsByDate[scrapedSlot.date].push(upsertedId);
-    }
-
-    // Prune slots for this venue+date that weren't in the latest scrape.
-    // This makes the scrape the source of truth and removes stale courts
-    // (e.g. cricket courts that existed before filtering was added).
-    for (const [date, upsertedIds] of Object.entries(upsertedIdsByDate)) {
-      await db.delete(slots).where(
-        and(
-          eq(slots.venueId, venueId),
-          eq(slots.date, date),
-          notInArray(slots.id, upsertedIds)
-        )
-      );
-    }
-  }
-
-  return changes;
-}
-
-// Get current availability for a venue and date
-export async function getAvailability(venueSlug: string, date: string) {
-  const venue = await db.query.venues.findFirst({
-    where: eq(venues.slug, venueSlug),
-  });
-
-  if (!venue) return [];
-
-  return db.query.slots.findMany({
-    where: and(eq(slots.venueId, venue.id), eq(slots.date, date)),
-  });
 }

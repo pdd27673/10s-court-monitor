@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { courtLabelImpliesCoaching } from "@/lib/coaching-label";
+import { dayTimesToLabels } from "@/lib/time";
 import { VENUES } from "@/lib/constants";
 import { getBookingUrl } from "@/lib/utils/link-helpers";
 import { SiteNav } from "@/components/layout/SiteNav";
@@ -409,7 +410,9 @@ function DashboardContent() {
               id: w.id,
               venueSlug: w.venue?.slug || null,
               venueName: w.venue?.name || null,
-              dayTimes: w.dayTimes || {
+              // The API stores canonical HH:MM; this picker works in am/pm labels,
+              // so map every time back to its label on hydration ("19:00" → "7pm").
+              dayTimes: (dayTimesToLabels(w.dayTimes) as Watch["dayTimes"]) || {
                 monday: [],
                 tuesday: [],
                 wednesday: [],

@@ -1,4 +1,14 @@
-import { pgTable, text, integer, primaryKey, index, unique } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  integer,
+  primaryKey,
+  index,
+  unique,
+  jsonb,
+  doublePrecision,
+  timestamp,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 // ============================================
@@ -33,7 +43,46 @@ export const venues = pgTable("venues", {
   id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
   slug: text("slug").notNull().unique(),
   name: text("name").notNull(),
-});
+  // --- Phase 1 additive metadata + geo (all nullable; current app ignores them) ---
+  operator: text("operator"), // e.g. "Courtside Hubs CIC", "Newham"
+  sourceType: text("source_type"), // 'courtside' | 'clubspark' (mirrors VenueType)
+  externalId: text("external_id"), // feed facility id (OpenActive facility-use @id / ClubSpark venue id)
+  address: text("address"),
+  postcode: text("postcode"),
+  amenities: jsonb("amenities"),
+  bookingUrlTemplate: text("booking_url_template"), // deep-link template for hand-off booking
+  active: integer("active").default(1),
+  // Plain lat/lng (PostGIS deferred — not available on the Railway image). A
+  // btree index on (lat,lng) covers bounding-box map queries at our scale.
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+}, (table) => ({
+  // Bounding-box map queries (viewport / radius) without PostGIS.
+  latLngIdx: index("idx_venues_lat_lng").on(table.lat, table.lng),
+}));
+
+// Individual courts within a venue (OpenActive individual-facility-use).
+// Populated by the ingestion adapters in later phases; slots link here as they migrate.
+export const courts = pgTable(
+  "courts",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    venueId: integer("venue_id")
+      .references(() => venues.id, { onDelete: "cascade" })
+      .notNull(),
+    externalId: text("external_id"), // individual-facility-use @id (stable court identity)
+    name: text("name"),
+    // Seeded-but-excluded marker. Non-tennis courts (padel, cricket nets …) at a
+    // venue we DO track are stored rather than dropped, so slot resolution can
+    // tell "deliberately excluded" apart from "court we forgot to seed" — the
+    // latter is a real gap worth alerting on. Flagged courts never produce slots.
+    nonTennis: integer("non_tennis").notNull().default(0),
+  },
+  (table) => ({
+    uniqueCourt: unique().on(table.venueId, table.externalId),
+    venueIdx: index("idx_courts_venue").on(table.venueId),
+  })
+);
 
 export const slots = pgTable(
   "slots",
@@ -48,6 +97,15 @@ export const slots = pgTable(
     status: text("status").notNull(), // 'available', 'booked', 'closed', 'coaching'
     price: text("price"),
     updatedAt: text("updated_at").default(nowText),
+    // --- Phase 1 additive feed columns (nullable; populated by ingestion adapters
+    // in later phases, then time is normalized end-to-end in Phase 6) ---
+    courtId: integer("court_id").references(() => courts.id, { onDelete: "set null" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    startMinute: integer("start_minute"), // minutes from midnight, local venue time
+    remainingUses: integer("remaining_uses"), // RPDE availability (>0 = bookable)
+    maxUses: integer("max_uses"),
+    bookingUrl: text("booking_url"),
   },
   (table) => ({
     // Composite unique constraint to prevent duplicate slot entries
@@ -137,15 +195,23 @@ export const registrationRequests = pgTable(
   })
 );
 
-// Tracks scraping schedule for each venue-date combination
-export const scrapeTargets = pgTable("scrape_targets", {
-  id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
-  venueSlug: text("venue_slug").notNull(),
-  date: text("date").notNull(), // YYYY-MM-DD
-  lastScrapedAt: text("last_scraped_at"), // ISO timestamp
-  nextScrapeAt: text("next_scrape_at"), // ISO timestamp - when next scrape is due
-  createdAt: text("created_at").default(nowText),
-});
+// RPDE / interval feed cursors — one row per (source, feed). Persists the RPDE
+// `next` cursor so polling resumes where it left off. Also namespaces the Clock
+// 2b reconcile round-robin (source='reconcile') and per-clock cron throttles
+// (source='clock'). Replaced the retired `scrape_targets` scheduler.
+export const feedState = pgTable(
+  "feed_state",
+  {
+    id: integer("id").primaryKey().generatedByDefaultAsIdentity(),
+    source: text("source").notNull(), // 'openactive' | 'clubspark'
+    feed: text("feed").notNull(), // 'facility-uses' | 'individual-facility-use-slots'
+    nextCursor: text("next_cursor"),
+    lastPolledAt: text("last_polled_at"), // ISO timestamp
+  },
+  (table) => ({
+    uniqueFeed: unique().on(table.source, table.feed),
+  })
+);
 
 // ============================================
 // NextAuth tables (JWT sessions - no sessions table needed)
@@ -169,10 +235,11 @@ export const verificationTokens = pgTable(
 
 export type User = typeof users.$inferSelect;
 export type Venue = typeof venues.$inferSelect;
+export type Court = typeof courts.$inferSelect;
+export type FeedState = typeof feedState.$inferSelect;
 export type Slot = typeof slots.$inferSelect;
 export type Watch = typeof watches.$inferSelect;
 export type NotificationChannel = typeof notificationChannels.$inferSelect;
 export type NotificationLogEntry = typeof notificationLog.$inferSelect;
 export type VerificationToken = typeof verificationTokens.$inferSelect;
 export type RegistrationRequest = typeof registrationRequests.$inferSelect;
-export type ScrapeTarget = typeof scrapeTargets.$inferSelect;
