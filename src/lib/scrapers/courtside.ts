@@ -62,6 +62,19 @@ async function fetchWithRetry(
         throw new Error("Blocked or empty response");
       }
 
+      // Bot challenge. Since 2026-07-28 the site 302s booking pages to
+      // /verify-human, a Cloudflare Turnstile interstitial served as a normal
+      // 200 with a full-size body — so it clears every check above, parses to
+      // zero rows, and the caller logs a healthy "0 slots". That silence is the
+      // bug: `fullSweep` reported "0 slots, 0 errors" for 12 days, and
+      // `confirmFeedChanges` only passes a transition through unsuppressed when
+      // its venue-day *errors*, so a soft-empty parse suppressed every watched
+      // flip instead. Throwing here is what puts the venue-day in `failedVD`
+      // and restores that fail-safe.
+      if (html.includes("cf-turnstile") || html.includes("verify-human")) {
+        throw new Error("Bot challenge (Cloudflare Turnstile at /verify-human)");
+      }
+
       return html;
     } catch (error) {
       lastError = error as Error;
