@@ -117,3 +117,48 @@ describe("scrapeCourtside – court filtering", () => {
     expect(slots).toHaveLength(0);
   });
 });
+
+describe("scrapeCourtside – bot challenge detection", () => {
+  // The real interstitial: a 200 with a full-size body, which is why every
+  // pre-existing guard (status, ok, "Access Denied", length) lets it through.
+  const turnstilePage = `
+    <html><head><title>Book courts and pitches in Tower Hamlets with Courtside</title></head>
+    <body><h1>Just checking&hellip;</h1>
+      <p>Before you can continue we need to verify that you're actually a person.</p>
+      <div class="cf-turnstile" data-sitekey="0x4AAAAAAD_XMJ-DWaJIbiHD" data-theme="auto"></div>
+      <script>function onTurnstileSuccess(token) { document.forms[0].submit(); }</script>
+    </body></html>
+  `;
+
+  it("throws on the Turnstile interstitial instead of parsing it as zero slots", async () => {
+    vi.mocked(proxyFetch).mockResolvedValue(makeMockResponse(turnstilePage) as never);
+
+    await expect(scrapeCourtside("victoria-park", "2026-04-03")).rejects.toThrow(/Turnstile/);
+  });
+
+  it("detects the challenge by its /verify-human target alone", async () => {
+    const withoutWidget = `
+      <html><body><p>Please continue to
+      <a href="/verify-human">verification</a> before booking a court at this venue.</p>
+      </body></html>
+    `;
+    vi.mocked(proxyFetch).mockResolvedValue(makeMockResponse(withoutWidget) as never);
+
+    await expect(scrapeCourtside("victoria-park", "2026-04-03")).rejects.toThrow(/Bot challenge/);
+  });
+
+  it("still returns an empty list for a genuine page with no bookable courts", async () => {
+    // The distinction that matters: "no courts free" must stay a successful
+    // empty parse, not an error, or every fully-booked venue-day looks blocked.
+    const emptyButValid = `
+      <html><head><title>Victoria Park — Tennis Tower Hamlets</title></head>
+      <body><h1>Victoria Park</h1>
+        <p>There are no courts available to book on this date. Please try another day.</p>
+        <table><tr><th class="time">8am</th></tr></table>
+      </body></html>
+    `;
+    vi.mocked(proxyFetch).mockResolvedValue(makeMockResponse(emptyButValid) as never);
+
+    await expect(scrapeCourtside("victoria-park", "2026-04-03")).resolves.toEqual([]);
+  });
+});
