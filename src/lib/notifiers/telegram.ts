@@ -6,8 +6,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 export async function sendTelegramMessage(chatId: string, message: string) {
   if (!TELEGRAM_BOT_TOKEN) {
-    console.warn("TELEGRAM_BOT_TOKEN not set, skipping Telegram notification");
-    return;
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   }
 
   const response = await fetch(`${TELEGRAM_API}/sendMessage`, {

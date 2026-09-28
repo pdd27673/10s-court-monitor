@@ -1,4 +1,5 @@
 #!/usr/bin/env npx tsx
+import "dotenv/config";
 /**
  * Setup Telegram Webhook
  * 
@@ -9,15 +10,22 @@
  * 
  * Requirements:
  *   - TELEGRAM_BOT_TOKEN must be set in environment
+ *   - TELEGRAM_WEBHOOK_SECRET must match the web service environment
  *   - NEXT_PUBLIC_APP_URL must be set to your deployed app URL
  *   - The webhook endpoint must be publicly accessible
  */
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.AUTH_URL;
 
 if (!TELEGRAM_BOT_TOKEN) {
   console.error("❌ ERROR: TELEGRAM_BOT_TOKEN is not set in environment");
+  process.exit(1);
+}
+
+if (!TELEGRAM_WEBHOOK_SECRET || !/^[A-Za-z0-9_-]{1,256}$/.test(TELEGRAM_WEBHOOK_SECRET)) {
+  console.error("❌ ERROR: TELEGRAM_WEBHOOK_SECRET must be 1–256 letters, digits, underscores, or hyphens");
   process.exit(1);
 }
 
@@ -32,7 +40,6 @@ const telegramApi = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN!}`;
 
 async function setupWebhook() {
   console.log("🔧 Checking Telegram webhook status...");
-  console.log(`   Bot Token: ${TELEGRAM_BOT_TOKEN!.substring(0, 10)}...`);
   console.log(`   Target URL: ${webhookUrl}`);
   console.log();
 
@@ -50,7 +57,7 @@ async function setupWebhook() {
     const isAlreadySet = currentUrl === webhookUrl;
 
     if (isAlreadySet) {
-      console.log("✅ Webhook is already set correctly!");
+      console.log("Webhook URL is already set; refreshing its secret token.");
       console.log(`   Current URL: ${currentUrl}`);
       console.log(`   Pending updates: ${info.result.pending_update_count || 0}`);
       
@@ -58,15 +65,11 @@ async function setupWebhook() {
         console.log(`   ⚠️  Last error: ${info.result.last_error_message}`);
         console.log(`   Error date: ${new Date(info.result.last_error_date * 1000).toISOString()}`);
       } else {
-        console.log(`   ✅ No errors - webhook is working!`);
+        console.log(`   No delivery errors reported`);
       }
       
       console.log();
-      console.log("🎉 Your bot is ready! No changes needed.");
-      return;
-    }
-
-    if (currentUrl) {
+    } else if (currentUrl) {
       console.log(`⚠️  Webhook is currently set to a different URL:`);
       console.log(`   Current: ${currentUrl}`);
       console.log(`   Updating to: ${webhookUrl}`);
@@ -82,7 +85,7 @@ async function setupWebhook() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: webhookUrl,
-        drop_pending_updates: true, // Clear any pending updates
+        secret_token: TELEGRAM_WEBHOOK_SECRET,
       }),
     });
 
