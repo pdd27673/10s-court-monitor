@@ -60,6 +60,7 @@ CRON_SECRET=your-random-secret-here
 
 # Telegram Bot (get from @BotFather on Telegram)
 TELEGRAM_BOT_TOKEN=123456:ABC-xxxxx
+TELEGRAM_WEBHOOK_SECRET=your-random-webhook-secret
 
 # Email via Resend (HTTP API - works on Railway/cloud)
 # Sign up at https://resend.com (free: 3000 emails/month)
@@ -85,8 +86,11 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 1. Open Telegram and message [@BotFather](https://t.me/BotFather)
 2. Send `/newbot` and follow prompts
 3. Copy the token to `TELEGRAM_BOT_TOKEN`
-4. **Set up the webhook** (see [Telegram Webhook Setup](#telegram-webhook-setup) below)
-5. To get your chat ID, message your bot (e.g., [@MvgMonitorBot](https://t.me/MvgMonitorBot)) - it will automatically respond with your Chat ID
+4. Set `TELEGRAM_WEBHOOK_SECRET` to the same random value in the web service and the webhook setup environment
+5. **Set up the webhook** (see [Telegram Webhook Setup](#telegram-webhook-setup) below)
+6. To get your chat ID, message your bot (e.g., [@MvgMonitorBot](https://t.me/MvgMonitorBot)) - it will automatically respond with your Chat ID
+
+The ingestion worker also needs `TELEGRAM_BOT_TOKEN` to send court alerts. Railway service variables are configured per service.
 
 ---
 
@@ -104,14 +108,15 @@ npx tsx scripts/setup-telegram-webhook.ts
 
 **Requirements:**
 - `TELEGRAM_BOT_TOKEN` must be set in environment
+- `TELEGRAM_WEBHOOK_SECRET` must match the value configured on the deployed web service
 - `NEXT_PUBLIC_APP_URL` or `AUTH_URL` must be set to your deployed app URL
 - The webhook endpoint must be publicly accessible
 
 ### What It Does
 
 The setup script:
-1. Checks if the webhook is already configured correctly
-2. Only updates the webhook if the URL has changed or isn't set
+1. Checks the current webhook URL and delivery errors
+2. Registers the URL and secret token, even if the URL was already set
 3. Verifies the configuration and shows any errors
 
 ### When to Run It
@@ -119,6 +124,7 @@ The setup script:
 You **only need to run it:**
 - Once after initial deployment
 - If you change your app URL (`NEXT_PUBLIC_APP_URL`)
+- If you change `TELEGRAM_WEBHOOK_SECRET`
 - If you need to reset/update the webhook
 
 The webhook persists on Telegram's servers, so you don't need to run it every time you deploy.

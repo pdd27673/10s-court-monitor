@@ -54,13 +54,13 @@ describe("sendTelegramMessage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("no-ops (no fetch) when TELEGRAM_BOT_TOKEN is unset", async () => {
+  it("throws when TELEGRAM_BOT_TOKEN is unset", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const { sendTelegramMessage } = await import("./telegram");
-    await sendTelegramMessage("chat-1", "hi");
+    await expect(sendTelegramMessage("chat-1", "hi")).rejects.toThrow("TELEGRAM_BOT_TOKEN is not configured");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

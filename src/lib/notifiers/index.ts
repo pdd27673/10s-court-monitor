@@ -151,8 +151,8 @@ export async function notifyUsers(changes: SlotChange[]) {
           `Notified user ${userId} via ${channel.type}: ${claimed.length} slot(s) bundled`
         );
       } catch (error) {
-        // Send failed — RELEASE the claims so a later tick retries them (the send
-        // is a single bundle, so it's all-or-nothing).
+        // Send failed — release the claims so a repeated transition can be sent.
+        // This pipeline has no durable retry queue for a one-time transition.
         for (const change of claimed) {
           await db
             .delete(notificationLog)
